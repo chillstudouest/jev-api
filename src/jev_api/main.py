@@ -1,4 +1,4 @@
-"""jev-api FastAPI application."""
+"""jev-api — Jev-compatible System One HTTP server powered by Von 395M."""
 
 from __future__ import annotations
 
@@ -6,17 +6,26 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from jev_api.auth import require_api_key
 from jev_api.config import Settings, get_settings
 from jev_api.engine import VerdictEngine
+from jev_api.errors import (
+    http_exception_handler,
+    raise_usage,
+    validation_exception_handler,
+)
 from jev_api.schemas import (
-    DecideRequest,
-    DecideResponse,
+    ApiUsageError,
     HealthResponse,
     ModelInfoResponse,
     ReadyResponse,
+    SystemOneRequest,
+    SystemOneResponse,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -31,16 +40,25 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         _app.state.settings = settings
         _app.state.engine = engine
+        # Background load so /health becomes ready immediately (Coolify).
+        # Poll GET /ready before calling /v1/systemone.
         if settings.download_on_startup:
+            logger.info("Starting Von model load in background…")
             engine.start_background_load()
         yield
 
     app = FastAPI(
         title="jev-api",
         version=settings.api_version,
-        description="HTTP microservice for openJev Verdict 2.0 decision inference",
+        description=(
+            "Self-hosted Jev-compatible System One API. "
+            "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
+            "Engine: Von OptionMarker 395M (wfzyx/von-1.0)."
+        ),
         lifespan=lifespan,
     )
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 
     @app.get("/health", response_model=HealthResponse, tags=["ops"])
     def health() -> HealthResponse:
@@ -52,7 +70,11 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         if eng.status.ready:
             return ReadyResponse(status="ready", ready=True)
         if eng.status.loading:
-            return ReadyResponse(status="loading", ready=False, detail="Model is loading")
+            return ReadyResponse(
+                status="loading",
+                ready=False,
+                detail="Downloading / initializing Von OptionMarker (~1.5GB). Retry shortly.",
+            )
         if eng.status.error:
             return ReadyResponse(status="error", ready=False, detail=eng.status.error)
         return ReadyResponse(status="loading", ready=False, detail="Model not started")
@@ -61,7 +83,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         "/v1/model",
         response_model=ModelInfoResponse,
         dependencies=[Depends(require_api_key)],
-        tags=["v1"],
+        tags=["ops"],
     )
     def model_info(request: Request) -> ModelInfoResponse:
         eng: VerdictEngine = request.app.state.engine
@@ -76,37 +98,50 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
             parameters_human=human,
             device=eng.status.device,
             api_version=cfg.api_version,
-            backbone=eng.status.backbone or str(cfg.backbone_dir),
+            backbone=eng.status.backbone,
             checkpoint_repo=cfg.hf_repo,
             ready=eng.status.ready,
             extras={
-                "temperature_shape": [3, 8],
-                "heads": ["marker_pointer", "correctness"],
-                "max_len": 512,
-                "head_max_len": 192,
-                "option_token_cap": 48,
+                "von_backend": eng.status.backend,
+                "note": "Protocol-compatible with Jev; predictions come from Von 395M OptionMarker",
             },
         )
 
-    @app.post(
-        "/v1/decide",
-        response_model=DecideResponse,
-        dependencies=[Depends(require_api_key)],
-        tags=["v1"],
-    )
-    def decide(payload: DecideRequest, request: Request) -> DecideResponse:
+    def _systemone(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
         eng: VerdictEngine = request.app.state.engine
         if not eng.status.ready:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=eng.status.error or "Model is not ready",
-            )
+            raise_usage(503, eng.status.not_ready_message(), error_type="server_error")
         try:
-            return eng.decide(payload)
+            return eng.systemone(payload)
+        except ApiUsageError as exc:
+            raise_usage(400, exc.message, exc.error_type)
+        except ValidationError as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise_usage(400, str(exc) or "Invalid request.")
         except RuntimeError as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+            raise_usage(503, str(exc), error_type="server_error")
+
+    @app.post(
+        "/v1/systemone",
+        response_model=SystemOneResponse,
+        dependencies=[Depends(require_api_key)],
+        tags=["systemone"],
+    )
+    def systemone(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
+        return _systemone(payload, request)
+
+    @app.post(
+        "/api/v1/systemone",
+        response_model=SystemOneResponse,
+        dependencies=[Depends(require_api_key)],
+        tags=["systemone"],
+        include_in_schema=False,
+    )
+    def systemone_api_alias(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
+        return _systemone(payload, request)
 
     return app
 
@@ -118,7 +153,6 @@ def run() -> None:
     import uvicorn
 
     settings = get_settings()
-    # Single worker: one in-memory model copy. Multiple workers would multiply RAM.
     uvicorn.run(
         "jev_api.main:app",
         host=settings.host,

@@ -7,7 +7,9 @@
   "health_check_path": "/health",
   "health_check_port": "8000",
   "health_check_return_code": "200",
-  "limits_memory": "3072",
+  "health_check_method": "GET",
+  "health_check_scheme": "http",
+  "limits_memory": "8192",
   "limits_cpus": "2",
   "restart": "unless-stopped"
 }

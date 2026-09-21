@@ -1,4 +1,4 @@
-"""Shared pytest fixtures with a fake engine (no model weights required)."""
+"""Shared pytest fixtures — FakeEngine returns Jev-shaped answers without Von weights."""
 
 from __future__ import annotations
 
@@ -11,9 +11,18 @@ from fastapi.testclient import TestClient
 from jev_api.config import Settings
 from jev_api.engine import EngineStatus, VerdictEngine
 from jev_api.main import create_app
-from jev_api.schemas import DecideRequest, DecideResponse
+from jev_api.schemas import (
+    ChoiceAnswer,
+    NoulAnswer,
+    ScoreAnswer,
+    SystemOneRequest,
+    SystemOneResponse,
+    Usage,
+    parse_questions,
+    resolve_request_model,
+)
 
-FIXTURES = Path(__file__).parent / "fixtures" / "decisions.json"
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "jev"
 
 
 class FakeEngine(VerdictEngine):
@@ -22,40 +31,55 @@ class FakeEngine(VerdictEngine):
         self.status = EngineStatus(
             ready=True,
             loading=False,
-            parameters=149_601_234,
-            backbone="vendor/modernbert",
+            parameters=395_000_000,
+            backbone="wfzyx/von-1.0",
             device="cpu",
-            checkpoint_dir="/tmp/fake",
+            backend="option-marker",
         )
 
     def start_background_load(self) -> None:
         return
 
-    def decide(self, request: DecideRequest) -> DecideResponse:
-        keys = [o.id for o in request.options] or ["false", "true"]
-        n = len(keys)
-        # Deterministic decreasing scores that sum to 1 — mirrors renormalized softmax.
-        raw = [float(n - i) for i in range(n)]
-        total = sum(raw)
-        scores = {k: raw[i] / total for i, k in enumerate(keys)}
-        choice = keys[0]
-        qtype = "noul" if request.type == "noul" else ("score" if request.type == "score" else "choice")
-        return DecideResponse(
-            choice=choice,
-            scores=scores,
-            confidence=0.91,
-            latency_ms=1.23,
-            qtype=qtype,  # type: ignore[arg-type]
-            expected_level=sum(i * scores[k] for i, k in enumerate(keys)),
-            label_index=0,
-            option_keys=keys,
-            model=self.settings.model_name,
+    def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
+        model_name = resolve_request_model(request.model)
+        questions = parse_questions(request.questions)
+        answers = {}
+        input_tokens = 0
+        for qid, question in questions.items():
+            if question.type == "choice":
+                keys = list(question.criteria.keys())
+                n = len(keys)
+                raw = [float(n - i) for i in range(n)]
+                total = sum(raw)
+                probs = {k: raw[i] / total for i, k in enumerate(keys)}
+                choice = max(probs, key=probs.get)  # type: ignore[arg-type]
+                sorted_p = sorted(probs.values(), reverse=True)
+                conf = sorted_p[0] - (sorted_p[1] if len(sorted_p) > 1 else 0.0)
+                answers[qid] = ChoiceAnswer(choice=choice, probabilities=probs, confidence=round(conf, 3))
+            elif question.type == "score":
+                n = len(question.criteria)
+                raw = [float(n - i) for i in range(n)]
+                total = sum(raw)
+                probs = {str(i): raw[i] / total for i in range(n)}
+                score = sum(i * probs[str(i)] for i in range(n))
+                legend = {str(i): label for i, label in enumerate(question.criteria)}
+                sorted_p = sorted(probs.values(), reverse=True)
+                conf = sorted_p[0] - (sorted_p[1] if len(sorted_p) > 1 else 0.0)
+                answers[qid] = ScoreAnswer(
+                    score=round(score, 2),
+                    legend=legend,
+                    probabilities=probs,
+                    confidence=round(conf, 3),
+                )
+            else:
+                noul = 0.93 if "urgent" in question.instructions.lower() else 0.35
+                answers[qid] = NoulAnswer(noul=noul)
+            input_tokens += 50
+        return SystemOneResponse(
+            model=model_name,
+            answers=answers,
+            usage=Usage(input_tokens=input_tokens, output_tokens=len(answers)),
         )
-
-
-@pytest.fixture
-def fixtures() -> dict:
-    return json.loads(FIXTURES.read_text(encoding="utf-8"))
 
 
 @pytest.fixture
@@ -64,7 +88,6 @@ def settings(tmp_path: Path) -> Settings:
         jev_api_key="test-secret-key",
         download_on_startup=False,
         model_cache_dir=tmp_path / "models",
-        backbone_dir=Path(__file__).resolve().parents[1] / "vendor" / "modernbert",
     )
 
 
@@ -79,3 +102,11 @@ def client(settings: Settings) -> TestClient:
 @pytest.fixture
 def auth_headers(settings: Settings) -> dict[str, str]:
     return {"Authorization": f"Bearer {settings.jev_api_key}"}
+
+
+@pytest.fixture
+def jev_fixtures() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for path in FIXTURES_DIR.glob("*.json"):
+        out[path.stem] = json.loads(path.read_text(encoding="utf-8"))
+    return out

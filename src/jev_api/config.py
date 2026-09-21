@@ -8,9 +8,6 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BACKBONE = ROOT / "vendor" / "modernbert"
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -20,27 +17,24 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    api_version: str = "1.0.0"
-    model_name: str = "openJev-verdict-2.0"
-    model_version: str = "2.0"
-    runtime_name: str = "pytorch+transformers"
+    api_version: str = "1.1.0"
+    model_name: str = "von-option-marker"
+    model_version: str = "1.0"
+    runtime_name: str = "pytorch+von-option-marker"
 
     host: str = "0.0.0.0"
     port: int = 8000
 
     jev_api_key: str = Field(default="", alias="JEV_API_KEY")
+    # Optional — wfzyx/von-1.0 is public; token only needed for higher HF rate limits.
     hf_token: str | None = Field(default=None, alias="HF_TOKEN")
-    hf_repo: str = Field(default="heman10x/openJev-verdict-2.0", alias="HF_REPO")
-    hf_revision: str | None = Field(default=None, alias="HF_REVISION")
+    hf_repo: str = Field(default="wfzyx/von-1.0", alias="HF_REPO")
 
     model_cache_dir: Path = Field(default=Path("/data/models"), alias="MODEL_CACHE_DIR")
-    backbone_dir: Path = Field(default=DEFAULT_BACKBONE, alias="BACKBONE_DIR")
-    checkpoint_filename: str = Field(default="model.pt", alias="CHECKPOINT_FILENAME")
-
+    # option-marker = Von 395M (ModernBERT-Large). Also: von-1.0 (NLI encoder path).
+    von_backend: str = Field(default="option-marker", alias="VON_BACKEND")
     device: str = Field(default="cpu", alias="JEV_DEVICE")
     download_on_startup: bool = Field(default=True, alias="DOWNLOAD_ON_STARTUP")
-    # Local/dev: point at an already-downloaded checkpoint directory.
-    local_checkpoint_dir: Path | None = Field(default=None, alias="LOCAL_CHECKPOINT_DIR")
 
 
 @lru_cache

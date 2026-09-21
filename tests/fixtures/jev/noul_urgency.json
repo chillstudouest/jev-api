@@ -1,0 +1,22 @@
+{
+  "request": {
+    "state": "Customer says refund me today or I cancel on Friday.",
+    "questions": {
+      "urgency": {
+        "type": "noul",
+        "instructions": "Is this message urgent?",
+        "criteria": {
+          "true": "Clearly urgent",
+          "false": "Can wait"
+        }
+      }
+    }
+  },
+  "constraints": {
+    "answer_keys": ["urgency"],
+    "noul_type": "noul",
+    "noul_min": 0,
+    "noul_max": 1,
+    "no_confidence": true
+  }
+}

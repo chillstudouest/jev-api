@@ -1,0 +1,23 @@
+{
+  "request": {
+    "state": "Charged twice for September and cancelling Friday unless refunded.",
+    "model": "jev-1.13.0",
+    "questions": {
+      "route": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+          "billing": "Payments and refunds",
+          "technical": "Bugs and outages"
+        }
+      }
+    }
+  },
+  "constraints": {
+    "answer_keys": ["route"],
+    "route_type": "choice",
+    "route_choice_in": ["billing", "technical"],
+    "has_confidence": true,
+    "has_probabilities_for": ["billing", "technical"]
+  }
+}
