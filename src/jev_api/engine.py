@@ -79,7 +79,6 @@ class VerdictEngine:
             token=self.settings.hf_token,
             cache_dir=str(cache),
             local_dir=str(cache / "snapshot"),
-            local_dir_use_symlinks=False,
         )
         return Path(local_dir)
 
