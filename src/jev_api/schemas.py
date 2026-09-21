@@ -1,7 +1,7 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
-Protocol-compatible with POST /v1/systemone as documented at
-https://jev-agent.com/api-reference — OpenJev is the inference engine only.
+Protocol-compatible with POST /v1/systemone.
+Engine: Von OptionMarker 395M (wfzyx/von-1.0) — not TypeSafe Jev weights.
 """
 
 from __future__ import annotations
@@ -10,11 +10,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SUPPORTED_MODELS = ("jev-latest", "jev-preview", "jev-1.13.0")
+SUPPORTED_MODELS = (
+    "jev-latest",
+    "jev-preview",
+    "jev-1.13.0",
+    "von-latest",
+    "von-preview",
+    "von-1.0.0",
+    "von-option-marker",
+)
 DEFAULT_MODEL = "jev-1.13.0"
-MODEL_ALIASES = {name: "openJev-verdict-2.0" for name in SUPPORTED_MODELS}
-
-QuestionType = Literal["choice", "score", "noul"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -54,8 +59,6 @@ Question = ChoiceQuestion | ScoreQuestion | NoulQuestion
 
 
 class ApiUsageError(Exception):
-    """Maps to HTTP 400 api_usage_error (TypeSafe)."""
-
     def __init__(self, message: str, error_type: str = "api_usage_error") -> None:
         super().__init__(message)
         self.message = message
@@ -63,11 +66,9 @@ class ApiUsageError(Exception):
 
 
 class SystemOneRequest(BaseModel):
-    """Jev System One request body (loose parse; deep validation in parse_questions)."""
-
     model_config = ConfigDict(extra="ignore")
 
-    state: str = Field(min_length=1)
+    state: Any = Field(..., description="Shared state (string or JSON object)")
     questions: dict[str, Any] = Field(min_length=1)
     model: str | None = None
 
@@ -78,13 +79,19 @@ class SystemOneRequest(BaseModel):
             return None
         return value.strip()
 
-    @property
-    def resolved_model(self) -> str:
-        return self.model or DEFAULT_MODEL
+    @field_validator("state")
+    @classmethod
+    def state_not_empty(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("state is required")
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("state must not be empty")
+        if isinstance(value, (list, dict)) and len(value) == 0:
+            raise ValueError("state must not be empty")
+        return value
 
 
 def parse_questions(raw_questions: dict[str, Any]) -> dict[str, Question]:
-    """Validate each question; unknown types → ApiUsageError (HTTP 400)."""
     if not raw_questions:
         raise ApiUsageError("Invalid request. questions must not be empty")
 
@@ -104,19 +111,16 @@ def parse_questions(raw_questions: dict[str, Any]) -> dict[str, Question]:
                 raise ApiUsageError("Invalid request.")
         except ApiUsageError:
             raise
-        except Exception as exc:  # pydantic ValidationError etc.
-            # Missing fields → re-raise as validation-like; treat criteria/type issues as 400
+        except Exception:
             from pydantic import ValidationError
 
-            if isinstance(exc, ValidationError):
-                raise  # becomes 422
-            raise ApiUsageError(str(exc) or "Invalid request.") from exc
+            raise  # ValidationError → 422
     return parsed
 
 
 def resolve_request_model(model: str | None) -> str:
     resolved = model or DEFAULT_MODEL
-    if resolved not in MODEL_ALIASES:
+    if resolved not in SUPPORTED_MODELS:
         raise ApiUsageError(f"Unknown model: {resolved}")
     return resolved
 
@@ -177,6 +181,6 @@ class ModelInfoResponse(BaseModel):
     checkpoint_repo: str
     ready: bool
     protocol: str = "jev-systemone"
-    engine: str = "openJev-verdict-2.0"
+    engine: str = "von-option-marker-395m"
     accepted_models: list[str] = Field(default_factory=lambda: list(SUPPORTED_MODELS))
     extras: dict[str, Any] = Field(default_factory=dict)

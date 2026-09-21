@@ -1,4 +1,4 @@
-"""Shared pytest fixtures — FakeEngine returns Jev-shaped answers without weights."""
+"""Shared pytest fixtures — FakeEngine returns Jev-shaped answers without Von weights."""
 
 from __future__ import annotations
 
@@ -8,11 +8,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from jev_api.adapter import to_jev_answer
 from jev_api.config import Settings
 from jev_api.engine import EngineStatus, VerdictEngine
 from jev_api.main import create_app
 from jev_api.schemas import (
+    ChoiceAnswer,
+    NoulAnswer,
+    ScoreAnswer,
     SystemOneRequest,
     SystemOneResponse,
     Usage,
@@ -29,10 +31,10 @@ class FakeEngine(VerdictEngine):
         self.status = EngineStatus(
             ready=True,
             loading=False,
-            parameters=149_601_234,
-            backbone="vendor/modernbert",
+            parameters=395_000_000,
+            backbone="wfzyx/von-1.0",
             device="cpu",
-            checkpoint_dir="/tmp/fake",
+            backend="option-marker",
         )
 
     def start_background_load(self) -> None:
@@ -44,34 +46,39 @@ class FakeEngine(VerdictEngine):
         answers = {}
         input_tokens = 0
         for qid, question in questions.items():
-            # Deterministic fake OpenJev record → Jev answer via the real adapter.
             if question.type == "choice":
                 keys = list(question.criteria.keys())
+                n = len(keys)
+                raw = [float(n - i) for i in range(n)]
+                total = sum(raw)
+                probs = {k: raw[i] / total for i, k in enumerate(keys)}
+                choice = max(probs, key=probs.get)  # type: ignore[arg-type]
+                sorted_p = sorted(probs.values(), reverse=True)
+                conf = sorted_p[0] - (sorted_p[1] if len(sorted_p) > 1 else 0.0)
+                answers[qid] = ChoiceAnswer(choice=choice, probabilities=probs, confidence=round(conf, 3))
             elif question.type == "score":
-                keys = [str(i) for i in range(len(question.criteria))]
+                n = len(question.criteria)
+                raw = [float(n - i) for i in range(n)]
+                total = sum(raw)
+                probs = {str(i): raw[i] / total for i in range(n)}
+                score = sum(i * probs[str(i)] for i in range(n))
+                legend = {str(i): label for i, label in enumerate(question.criteria)}
+                sorted_p = sorted(probs.values(), reverse=True)
+                conf = sorted_p[0] - (sorted_p[1] if len(sorted_p) > 1 else 0.0)
+                answers[qid] = ScoreAnswer(
+                    score=round(score, 2),
+                    legend=legend,
+                    probabilities=probs,
+                    confidence=round(conf, 3),
+                )
             else:
-                keys = ["false", "true"]
-            n = len(keys)
-            raw = [float(n - i) for i in range(n)]
-            total = sum(raw)
-            probs = [r / total for r in raw]
-            # For noul fixtures that expect high "true", bias true when instructions contain "urgent"
-            if question.type == "noul" and "urgent" in question.instructions.lower():
-                probs = [0.07, 0.93]
-            infer = {
-                "choice": keys[int(max(range(n), key=lambda i: probs[i]))],
-                "option_keys": keys,
-                "probs": probs,
-                "confidence": 0.91,
-                "expected_level": sum(i * probs[i] for i in range(n)),
-                "label_index": int(max(range(n), key=lambda i: probs[i])),
-            }
-            answers[qid] = to_jev_answer(question, infer)
-            input_tokens += 40 + n * 10
+                noul = 0.93 if "urgent" in question.instructions.lower() else 0.35
+                answers[qid] = NoulAnswer(noul=noul)
+            input_tokens += 50
         return SystemOneResponse(
             model=model_name,
             answers=answers,
-            usage=Usage(input_tokens=input_tokens, output_tokens=0),
+            usage=Usage(input_tokens=input_tokens, output_tokens=len(answers)),
         )
 
 
@@ -81,7 +88,6 @@ def settings(tmp_path: Path) -> Settings:
         jev_api_key="test-secret-key",
         download_on_startup=False,
         model_cache_dir=tmp_path / "models",
-        backbone_dir=Path(__file__).resolve().parents[1] / "vendor" / "modernbert",
     )
 
 

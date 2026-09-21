@@ -6,9 +6,10 @@ services:
     environment:
       JEV_API_KEY: ${JEV_API_KEY:-dev-key-change-me}
       HF_TOKEN: ${HF_TOKEN:-}
-      HF_REPO: ${HF_REPO:-heman10x/openJev-verdict-2.0}
+      HF_REPO: ${HF_REPO:-wfzyx/von-1.0}
+      VON_BACKEND: option-marker
       MODEL_CACHE_DIR: /data/models
-      BACKBONE_DIR: /app/vendor/modernbert
+      HF_HOME: /data/models
       JEV_DEVICE: cpu
       DOWNLOAD_ON_STARTUP: "true"
     volumes:
@@ -23,8 +24,8 @@ services:
         ]
       interval: 30s
       timeout: 5s
-      retries: 5
-      start_period: 180s
+      retries: 8
+      start_period: 300s
 
 volumes:
   jev-model-cache:

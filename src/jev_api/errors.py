@@ -1,18 +1,11 @@
-"""Jev-compatible error helpers.
-
-Observed TypeSafe / jev-agent shapes (jevaiguide.com, live probes):
-
-  401 → {"detail": {"error_type": "authentication_error", "message": "..."}}
-  403 → {"detail": {"error_type": "authentication_error", "message": "Must supply an API key!..."}}
-  400 → {"detail": {"error_type": "api_usage_error"|"max_tokens_exceeded", "message": "..."}}
-  422 → FastAPI-style list of {loc, msg, type}
-"""
+"""Jev-compatible error helpers."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -34,14 +27,13 @@ def raise_usage(status_code: int, message: str, error_type: str = "api_usage_err
 
 
 async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
-    # Preserve FastAPI/Pydantic list shape used by TypeSafe 422 responses.
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
     detail: Any = exc.detail
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": detail},
+        content={"detail": jsonable_encoder(detail)},
         headers=getattr(exc, "headers", None),
     )

@@ -1,4 +1,4 @@
-"""jev-api — Jev-compatible System One HTTP server powered by openJev Verdict 2.0."""
+"""jev-api — Jev-compatible System One HTTP server powered by Von 395M."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
 from pydantic import ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from jev_api.auth import require_api_key
 from jev_api.config import Settings, get_settings
@@ -51,7 +50,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engine: openJev-verdict-2.0 (not bit-identical to TypeSafe Jev)."
+            "Engine: Von OptionMarker 395M (wfzyx/von-1.0)."
         ),
         lifespan=lifespan,
     )
@@ -92,16 +91,12 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
             parameters_human=human,
             device=eng.status.device,
             api_version=cfg.api_version,
-            backbone=eng.status.backbone or str(cfg.backbone_dir),
+            backbone=eng.status.backbone,
             checkpoint_repo=cfg.hf_repo,
             ready=eng.status.ready,
             extras={
-                "temperature_shape": [3, 8],
-                "heads": ["marker_pointer", "correctness"],
-                "max_len": 512,
-                "head_max_len": 192,
-                "option_token_cap": 48,
-                "note": "Protocol-compatible with Jev; predictions come from openJev-verdict-2.0",
+                "von_backend": eng.status.backend,
+                "note": "Protocol-compatible with Jev; predictions come from Von 395M OptionMarker",
             },
         )
 
@@ -114,19 +109,11 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         except ApiUsageError as exc:
             raise_usage(400, exc.message, exc.error_type)
         except ValidationError as exc:
-            # Deep question validation after the loose request parse.
             from fastapi import HTTPException
 
             raise HTTPException(status_code=422, detail=exc.errors()) from exc
         except ValueError as exc:
-            msg = str(exc)
-            if "max_tokens_exceeded" in msg:
-                raise_usage(
-                    400,
-                    "State plus questions exceed the model context window.",
-                    "max_tokens_exceeded",
-                )
-            raise_usage(400, msg or "Invalid request.")
+            raise_usage(400, str(exc) or "Invalid request.")
         except RuntimeError as exc:
             raise_usage(503, str(exc), error_type="server_error")
 
@@ -139,7 +126,6 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
     def systemone(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
         return _systemone(payload, request)
 
-    # Alias matching jev-agent.com path layout (field-for-field identical body).
     @app.post(
         "/api/v1/systemone",
         response_model=SystemOneResponse,

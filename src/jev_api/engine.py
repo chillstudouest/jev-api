@@ -1,23 +1,19 @@
-"""Verdict 2.0 engine: download once, load once, batch-infer Jev System One requests."""
+"""Von 395M (OptionMarker) engine behind the Jev-compatible HTTP contract."""
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import torch
-from huggingface_hub import snapshot_download
-from transformers import AutoTokenizer
-
-from jev_api.adapter import build_jev_item, to_jev_answer
 from jev_api.config import Settings
-from jev_api.model import CorrectnessHead, VerdictModel, apply_temperature
-from jev_api.preprocess import Item, collate
 from jev_api.schemas import (
-    Question,
+    Answer,
+    ChoiceAnswer,
+    NoulAnswer,
+    ScoreAnswer,
     SystemOneRequest,
     SystemOneResponse,
     Usage,
@@ -34,25 +30,22 @@ class EngineStatus:
     loading: bool = False
     error: str | None = None
     parameters: int | None = None
-    backbone: str = ""
+    backbone: str = "wfzyx/von-1.0"
     device: str = "cpu"
-    checkpoint_dir: str | None = None
+    backend: str = "option-marker"
 
 
 class VerdictEngine:
-    """Thread-safe single-model inference engine."""
+    """Thin wrapper: load Von once, expose systemone() for the HTTP layer."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.status = EngineStatus(device=settings.device)
-        self._lock = threading.Lock()
+        self.status = EngineStatus(device=settings.device, backend=settings.von_backend)
         self._load_lock = threading.Lock()
-        self.model: VerdictModel | None = None
-        self.tokenizer: Any = None
-        self.pad_id: int = 0
+        self._von: Any = None
 
     def start_background_load(self) -> None:
-        thread = threading.Thread(target=self._safe_load, name="jev-model-load", daemon=True)
+        thread = threading.Thread(target=self._safe_load, name="von-model-load", daemon=True)
         thread.start()
 
     def _safe_load(self) -> None:
@@ -64,147 +57,87 @@ class VerdictEngine:
             try:
                 self.load()
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Model load failed")
+                logger.exception("Von model load failed")
                 self.status.error = str(exc)
                 self.status.ready = False
             finally:
                 self.status.loading = False
 
-    def ensure_checkpoint(self) -> Path:
-        if self.settings.local_checkpoint_dir is not None:
-            path = Path(self.settings.local_checkpoint_dir)
-            if not path.exists():
-                raise FileNotFoundError(f"LOCAL_CHECKPOINT_DIR not found: {path}")
-            return path
-
-        cache = Path(self.settings.model_cache_dir)
-        cache.mkdir(parents=True, exist_ok=True)
-        logger.info("Downloading checkpoint %s into %s", self.settings.hf_repo, cache)
-        local_dir = snapshot_download(
-            repo_id=self.settings.hf_repo,
-            revision=self.settings.hf_revision,
-            token=self.settings.hf_token,
-            cache_dir=str(cache),
-            local_dir=str(cache / "snapshot"),
-        )
-        return Path(local_dir)
-
-    def _resolve_checkpoint_file(self, checkpoint_dir: Path) -> Path:
-        direct = checkpoint_dir / self.settings.checkpoint_filename
-        if direct.is_file():
-            return direct
-        candidates = [
-            checkpoint_dir / "artifacts" / "verdict2" / "model.pt",
-            checkpoint_dir / "artifacts" / "verdict2-base" / "model.pt",
-            checkpoint_dir / "model.pt",
-        ]
-        for path in candidates:
-            if path.is_file():
-                return path
-        matches = list(checkpoint_dir.rglob("model.pt"))
-        if matches:
-            return matches[0]
-        raise FileNotFoundError(
-            f"Could not find {self.settings.checkpoint_filename} under {checkpoint_dir}"
-        )
-
     def load(self) -> None:
         settings = self.settings
-        device = settings.device
-        backbone_dir = Path(settings.backbone_dir)
-        if not backbone_dir.exists():
-            raise FileNotFoundError(
-                f"Vendored ModernBERT dir missing: {backbone_dir}. "
-                "Expected config.json + tokenizer files."
-            )
+        # Hugging Face cache dir (public wfzyx/von-1.0)
+        cache = str(settings.model_cache_dir)
+        os.makedirs(cache, exist_ok=True)
+        os.environ.setdefault("HF_HOME", cache)
+        os.environ.setdefault("TRANSFORMERS_CACHE", cache)
+        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", cache)
+        if settings.hf_token:
+            os.environ["HF_TOKEN"] = settings.hf_token
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.hf_token
 
-        checkpoint_dir = self.ensure_checkpoint()
-        ckpt_path = self._resolve_checkpoint_file(checkpoint_dir)
-        logger.info("Loading tokenizer from %s", backbone_dir)
-        tokenizer = AutoTokenizer.from_pretrained(str(backbone_dir), local_files_only=True)
-        pad_id = tokenizer.pad_token_id or 0
+        os.environ["VON_DEVICE"] = settings.device
+        os.environ["VON_BACKEND"] = settings.von_backend
 
-        logger.info("Loading checkpoint %s on %s", ckpt_path, device)
-        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
-        state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
-        backbone_name = checkpoint.get("backbone", str(backbone_dir))
+        from von.engine import VonEngine
 
-        model = VerdictModel(str(backbone_dir)).to(device)
-        missing, unexpected = model.load_state_dict(state_dict, strict=False)
-        if missing:
-            logger.warning("Missing keys when loading state_dict: %s", missing[:20])
-        if unexpected:
-            logger.warning("Unexpected keys when loading state_dict: %s", unexpected[:20])
-        model.eval()
+        logger.info("Loading Von backend=%s device=%s", settings.von_backend, settings.device)
+        von = VonEngine(backend_name=settings.von_backend, device=settings.device)
 
-        params = sum(p.numel() for p in model.parameters())
-        self.model = model
-        self.tokenizer = tokenizer
-        self.pad_id = pad_id
+        # Force weight download + load once at startup (not on first request).
+        backend = von.backend
+        if hasattr(backend, "_get_model"):
+            model = backend._get_model()
+            params = sum(p.numel() for p in model.parameters())
+        elif hasattr(backend, "_get_model_and_tok"):
+            model, _tok = backend._get_model_and_tok()
+            params = sum(p.numel() for p in model.parameters())
+        else:
+            params = None
+
+        self._von = von
         self.status.parameters = params
-        self.status.backbone = backbone_name
-        self.status.device = device
-        self.status.checkpoint_dir = str(checkpoint_dir)
+        self.status.backbone = settings.hf_repo
+        self.status.device = settings.device
+        self.status.backend = settings.von_backend
         self.status.ready = True
         self.status.error = None
-        logger.info("Model ready: %.1fM parameters on %s", params / 1e6, device)
+        if params is not None:
+            logger.info("Von ready: %.1fM parameters on %s", params / 1e6, settings.device)
+        else:
+            logger.info("Von ready on %s", settings.device)
 
     def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
-        if not self.status.ready or self.model is None or self.tokenizer is None:
+        if not self.status.ready or self._von is None:
             raise RuntimeError(self.status.error or "Model is not ready")
 
+        # Validate Jev question shapes (raises ApiUsageError / ValidationError).
         model_name = resolve_request_model(request.model)
-        questions = parse_questions(request.questions)
-        items: list[Item] = []
-        qids: list[str] = []
-        qdefs: list[Question] = []
-        for qid, question in questions.items():
-            item = build_jev_item(self.tokenizer, request.state, qid, question)
-            items.append(item)
-            qids.append(qid)
-            qdefs.append(question)
+        parse_questions(request.questions)
 
-        records = self._infer_batch(items)
-        answers = {
-            qid: to_jev_answer(qdef, record)
-            for qid, qdef, record in zip(qids, qdefs, records, strict=True)
-        }
-        input_tokens = sum(len(it.ids) for it in items)
-        return SystemOneResponse(
+        von_resp = self._von.evaluate(
+            state=request.state,
+            questions=request.questions,
             model=model_name,
-            answers=answers,
-            usage=Usage(input_tokens=input_tokens, output_tokens=0),
         )
 
-    @torch.inference_mode()
-    def _infer_batch(self, items: list[Item]) -> list[dict[str, Any]]:
-        assert self.model is not None
-        with self._lock:
-            batch = collate(items, self.pad_id)
-            device_batch = {k: v.to(self.status.device) for k, v in batch.items()}
-            logits = self.model.option_logits(device_batch)
-            k = device_batch["marker_mask"].sum(-1)
-            logits = apply_temperature(logits, device_batch["qtype"], k, self.model.temperature)
-            probs = torch.softmax(logits, dim=-1)
-            feats = CorrectnessHead.features(probs, device_batch["marker_mask"], device_batch["qtype"])
-            confidence = torch.sigmoid(self.model.correctness(feats))
+        answers: dict[str, Answer] = {}
+        for qid, ans in von_resp.answers.items():
+            data = ans.model_dump() if hasattr(ans, "model_dump") else dict(ans)
+            qtype = data.get("type")
+            if qtype == "choice":
+                answers[qid] = ChoiceAnswer.model_validate(data)
+            elif qtype == "score":
+                answers[qid] = ScoreAnswer.model_validate(data)
+            elif qtype == "noul":
+                # Strip confidence if a backend ever adds it — Jev Noul has none.
+                answers[qid] = NoulAnswer(noul=float(data["noul"]))
+            else:
+                raise ValueError(f"Unknown answer type from Von: {qtype!r}")
 
-            records: list[dict[str, Any]] = []
-            for row, item in enumerate(items):
-                width = len(item.markers)
-                p = probs[row, :width].float().cpu()
-                p = p / max(float(p.sum()), 1e-9)
-                conf = float(confidence[row].cpu())
-                expected = float(sum(i * float(p[i]) for i in range(width)))
-                label_index = int(torch.argmax(p).item())
-                records.append(
-                    {
-                        "choice": item.option_keys[label_index],
-                        "option_keys": list(item.option_keys),
-                        "probs": [float(x) for x in p.tolist()],
-                        "confidence": conf,
-                        "expected_level": expected,
-                        "label_index": label_index,
-                    }
-                )
-            return records
+        usage_raw = von_resp.usage
+        usage = Usage(
+            input_tokens=int(getattr(usage_raw, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage_raw, "output_tokens", 0) or 0),
+        )
+        # Echo the client-facing Jev model alias (protocol compat), not the internal Von name.
+        return SystemOneResponse(model=model_name, answers=answers, usage=usage)

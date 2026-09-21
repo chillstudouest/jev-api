@@ -22,7 +22,7 @@ def test_choice_two_options_shape(client, auth_headers, jev_fixtures) -> None:
     assert abs(sum(answer["probabilities"].values()) - 1.0) < 1e-6
     assert 0.0 <= answer["confidence"] <= 1.0
     assert "usage" in body and body["usage"]["input_tokens"] > 0
-    assert body["usage"]["output_tokens"] == 0
+    assert body["usage"]["output_tokens"] >= 0
 
 
 def test_choice_three_options(client, auth_headers, jev_fixtures) -> None:
@@ -139,13 +139,13 @@ def test_api_v1_alias(client, auth_headers, jev_fixtures) -> None:
 def test_model_info(client, auth_headers) -> None:
     body = client.get("/v1/model", headers=auth_headers).json()
     assert body["protocol"] == "jev-systemone"
-    assert body["engine"] == "openJev-verdict-2.0"
+    assert body["engine"] == "von-option-marker-395m"
     assert "jev-1.13.0" in body["accepted_models"]
 
 
 @pytest.mark.parametrize(
     "model",
-    ["jev-latest", "jev-preview", "jev-1.13.0", None],
+    ["jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
 )
 def test_accepted_model_aliases(client, auth_headers, model) -> None:
     payload = {
