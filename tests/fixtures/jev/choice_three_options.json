@@ -1,0 +1,21 @@
+{
+  "request": {
+    "state": "Customer wants a bathroom renovation quote.",
+    "questions": {
+      "next": {
+        "type": "choice",
+        "instructions": "What should happen next?",
+        "criteria": {
+          "create_client": "Create a client",
+          "create_job": "Create a job",
+          "create_quote": "Create a quote"
+        }
+      }
+    }
+  },
+  "constraints": {
+    "answer_keys": ["next"],
+    "route_type": "choice",
+    "option_count": 3
+  }
+}

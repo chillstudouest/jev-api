@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-check that /health, /ready and /v1/decide respond as expected."""
+"""Smoke-check /health, /ready and Jev-compatible /v1/systemone."""
 
 from __future__ import annotations
 
@@ -12,9 +12,8 @@ import urllib.error
 import urllib.request
 
 
-def get(url: str, headers: dict[str, str] | None = None, timeout: float = 30.0) -> tuple[int, dict]:
-    req = urllib.request.Request(url, headers=headers or {}, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+def get(url: str, timeout: float = 30.0) -> tuple[int, dict]:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
@@ -43,43 +42,54 @@ def main() -> int:
     assert status == 200 and health["status"] == "ok"
 
     deadline = time.time() + args.wait_ready_s
-    ready_body: dict = {}
     while time.time() < deadline:
-        status, ready_body = get(f"{base}/ready")
-        print("ready", status, ready_body)
-        if ready_body.get("ready"):
+        status, ready = get(f"{base}/ready")
+        print("ready", status, ready)
+        if ready.get("ready"):
             break
-        if ready_body.get("status") == "error":
-            print("model failed to load", ready_body, file=sys.stderr)
+        if ready.get("status") == "error":
             return 1
         time.sleep(5)
     else:
-        print("timed out waiting for ready", file=sys.stderr)
         return 1
 
     if not args.api_key:
-        print("JEV_API_KEY missing; skipping /v1/decide", file=sys.stderr)
+        print("skip systemone (no API key)", file=sys.stderr)
         return 0
 
-    headers = {"Authorization": f"Bearer {args.api_key}"}
     payload = {
-        "type": "workflow",
-        "question": "What should happen next?",
-        "state": "The customer wants to renovate their bathroom and asks for a quote.",
-        "options": [
-            {"id": "create_client", "description": "Create a client"},
-            {"id": "create_job", "description": "Create a job"},
-            {"id": "create_quote", "description": "Create a quote"},
-        ],
+        "state": "Charged twice for September and cancelling Friday unless refunded.",
+        "model": "jev-1.13.0",
+        "questions": {
+            "route": {
+                "type": "choice",
+                "instructions": "Which team should handle this?",
+                "criteria": {
+                    "billing": "Payments and refunds",
+                    "technical": "Bugs and outages",
+                },
+            },
+            "urgency": {
+                "type": "noul",
+                "instructions": "Does this need a reply today?",
+                "criteria": {"true": "Time-sensitive", "false": "Can wait"},
+            },
+        },
     }
     try:
-        status, decide = post(f"{base}/v1/decide", payload, headers)
+        status, body = post(
+            f"{base}/v1/systemone",
+            payload,
+            {"Authorization": f"Bearer {args.api_key}"},
+        )
     except urllib.error.HTTPError as exc:
-        print("decide failed", exc.code, exc.read().decode(), file=sys.stderr)
+        print(exc.code, exc.read().decode(), file=sys.stderr)
         return 1
-    print("decide", status, json.dumps(decide, indent=2))
+    print("systemone", status, json.dumps(body, indent=2))
     assert status == 200
-    assert decide["choice"] in decide["scores"]
+    assert "route" in body["answers"] and "urgency" in body["answers"]
+    assert body["answers"]["urgency"]["type"] == "noul"
+    assert "confidence" not in body["answers"]["urgency"]
     return 0
 
 

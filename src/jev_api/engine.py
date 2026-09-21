@@ -1,10 +1,9 @@
-"""Verdict 2.0 engine: download checkpoint once, load once, infer exactly like upstream."""
+"""Verdict 2.0 engine: download once, load once, batch-infer Jev System One requests."""
 
 from __future__ import annotations
 
 import logging
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,10 +12,18 @@ import torch
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
+from jev_api.adapter import build_jev_item, to_jev_answer
 from jev_api.config import Settings
 from jev_api.model import CorrectnessHead, VerdictModel, apply_temperature
-from jev_api.preprocess import Item, build_decision_item, collate
-from jev_api.schemas import DecideRequest, DecideResponse
+from jev_api.preprocess import Item, collate
+from jev_api.schemas import (
+    Question,
+    SystemOneRequest,
+    SystemOneResponse,
+    Usage,
+    parse_questions,
+    resolve_request_model,
+)
 
 logger = logging.getLogger("jev_api.engine")
 
@@ -56,7 +63,7 @@ class VerdictEngine:
             self.status.error = None
             try:
                 self.load()
-            except Exception as exc:  # noqa: BLE001 — surface any load failure via /ready
+            except Exception as exc:  # noqa: BLE001
                 logger.exception("Model load failed")
                 self.status.error = str(exc)
                 self.status.ready = False
@@ -86,7 +93,6 @@ class VerdictEngine:
         direct = checkpoint_dir / self.settings.checkpoint_filename
         if direct.is_file():
             return direct
-        # Common layouts from the HF repo / upstream artifacts
         candidates = [
             checkpoint_dir / "artifacts" / "verdict2" / "model.pt",
             checkpoint_dir / "artifacts" / "verdict2-base" / "model.pt",
@@ -143,41 +149,38 @@ class VerdictEngine:
         self.status.error = None
         logger.info("Model ready: %.1fM parameters on %s", params / 1e6, device)
 
-    @torch.inference_mode()
-    def decide(self, request: DecideRequest) -> DecideResponse:
+    def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
         if not self.status.ready or self.model is None or self.tokenizer is None:
             raise RuntimeError(self.status.error or "Model is not ready")
 
-        started = time.perf_counter()
-        item = build_decision_item(
-            self.tokenizer,
-            qtype_raw=request.type,
-            question=request.question,
-            state=request.state,
-            options=[o.model_dump() for o in request.options],
-            case_id=request.case_id,
-            workflow=request.workflow,
-            qid=request.qid,
-        )
-        result = self._infer_item(item)
-        latency_ms = (time.perf_counter() - started) * 1000.0
-        qtype_name = {0: "choice", 1: "score", 2: "noul"}[item.qtype]
-        return DecideResponse(
-            choice=result["choice"],
-            scores=result["scores"],
-            confidence=result["confidence"],
-            latency_ms=round(latency_ms, 3),
-            qtype=qtype_name,  # type: ignore[arg-type]
-            expected_level=result["expected_level"],
-            label_index=result["label_index"],
-            option_keys=list(item.option_keys),
-            model=self.settings.model_name,
+        model_name = resolve_request_model(request.model)
+        questions = parse_questions(request.questions)
+        items: list[Item] = []
+        qids: list[str] = []
+        qdefs: list[Question] = []
+        for qid, question in questions.items():
+            item = build_jev_item(self.tokenizer, request.state, qid, question)
+            items.append(item)
+            qids.append(qid)
+            qdefs.append(question)
+
+        records = self._infer_batch(items)
+        answers = {
+            qid: to_jev_answer(qdef, record)
+            for qid, qdef, record in zip(qids, qdefs, records, strict=True)
+        }
+        input_tokens = sum(len(it.ids) for it in items)
+        return SystemOneResponse(
+            model=model_name,
+            answers=answers,
+            usage=Usage(input_tokens=input_tokens, output_tokens=0),
         )
 
-    def _infer_item(self, item: Item) -> dict[str, Any]:
+    @torch.inference_mode()
+    def _infer_batch(self, items: list[Item]) -> list[dict[str, Any]]:
         assert self.model is not None
         with self._lock:
-            batch = collate([item], self.pad_id)
+            batch = collate(items, self.pad_id)
             device_batch = {k: v.to(self.status.device) for k, v in batch.items()}
             logits = self.model.option_logits(device_batch)
             k = device_batch["marker_mask"].sum(-1)
@@ -186,19 +189,22 @@ class VerdictEngine:
             feats = CorrectnessHead.features(probs, device_batch["marker_mask"], device_batch["qtype"])
             confidence = torch.sigmoid(self.model.correctness(feats))
 
-            width = len(item.markers)
-            p = probs[0, :width].float().cpu()
-            p = p / max(float(p.sum()), 1e-9)
-            conf = float(confidence[0].cpu())
-            expected = float(sum(i * float(p[i]) for i in range(width)))
-            label_index = int(torch.argmax(p).item())
-            scores = {key: float(p[i]) for i, key in enumerate(item.option_keys)}
-            choice = item.option_keys[label_index]
-            return {
-                "choice": choice,
-                "scores": scores,
-                "confidence": conf,
-                "expected_level": expected,
-                "label_index": label_index,
-                "probs": [float(x) for x in p.tolist()],
-            }
+            records: list[dict[str, Any]] = []
+            for row, item in enumerate(items):
+                width = len(item.markers)
+                p = probs[row, :width].float().cpu()
+                p = p / max(float(p.sum()), 1e-9)
+                conf = float(confidence[row].cpu())
+                expected = float(sum(i * float(p[i]) for i in range(width)))
+                label_index = int(torch.argmax(p).item())
+                records.append(
+                    {
+                        "choice": item.option_keys[label_index],
+                        "option_keys": list(item.option_keys),
+                        "probs": [float(x) for x in p.tolist()],
+                        "confidence": conf,
+                        "expected_level": expected,
+                        "label_index": label_index,
+                    }
+                )
+            return records

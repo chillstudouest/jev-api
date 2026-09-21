@@ -1,0 +1,33 @@
+{
+  "request": {
+    "state": "Charged twice for September and cancelling Friday unless refunded.",
+    "model": "jev-preview",
+    "questions": {
+      "route": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+          "billing": "Payments and refunds",
+          "technical": "Bugs and outages"
+        }
+      },
+      "urgency": {
+        "type": "noul",
+        "instructions": "Does this need a reply today?",
+        "criteria": {
+          "true": "Time-sensitive",
+          "false": "Can wait"
+        }
+      },
+      "severity": {
+        "type": "score",
+        "instructions": "How severe is this?",
+        "criteria": ["Low", "Medium", "High", "Critical"]
+      }
+    }
+  },
+  "constraints": {
+    "answer_keys": ["route", "urgency", "severity"],
+    "multi": true
+  }
+}

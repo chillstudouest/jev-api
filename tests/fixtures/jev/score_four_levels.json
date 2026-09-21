@@ -1,0 +1,21 @@
+{
+  "request": {
+    "state": "Production API latency is 3x baseline for one region; no data loss reported.",
+    "model": "jev-latest",
+    "questions": {
+      "severity": {
+        "type": "score",
+        "instructions": "How severe is this incident?",
+        "criteria": ["Low", "Medium", "High", "Critical"]
+      }
+    }
+  },
+  "constraints": {
+    "answer_keys": ["severity"],
+    "score_type": "score",
+    "legend_keys": ["0", "1", "2", "3"],
+    "score_min": 0,
+    "score_max": 3,
+    "has_confidence": true
+  }
+}
