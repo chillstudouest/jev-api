@@ -38,14 +38,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     DOWNLOAD_ON_STARTUP=true
 
-# Coolify Dockerfile healthchecks need curl AND/OR wget in the image.
+# Coolify Dockerfile healthchecks need curl AND wget in the image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
-<<<<<<< HEAD
-=======
       wget \
->>>>>>> origin/dev
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin jev \
     && mkdir -p /data/models \
@@ -62,7 +59,7 @@ ENV PYTHONPATH=/app/src
 USER jev
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=10 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=10 \
   CMD curl -fsS http://127.0.0.1:8000/health || exit 1
 
 CMD ["python", "-m", "uvicorn", "jev_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
