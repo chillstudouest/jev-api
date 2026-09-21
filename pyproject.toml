@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jev-api"
+version = "1.0.0"
+description = "Production HTTP microservice for openJev Verdict 2.0 decision inference"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.6.0",
+  "torch>=2.2.0",
+  "transformers>=4.45.0",
+  "huggingface_hub>=0.26.0",
+  "safetensors>=0.4.0",
+  "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "httpx>=0.27.0",
+]
+
+[project.scripts]
+jev-api = "jev_api.main:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]

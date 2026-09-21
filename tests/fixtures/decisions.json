@@ -1,0 +1,40 @@
+{
+  "bathroom_quote": {
+    "type": "workflow",
+    "question": "What should happen next?",
+    "state": "The customer wants to renovate their bathroom and asks for a quote.",
+    "options": [
+      {"id": "create_client", "description": "Create a client"},
+      {"id": "create_job", "description": "Create a job"},
+      {"id": "create_quote", "description": "Create a quote"}
+    ]
+  },
+  "support_triage": {
+    "type": "choice",
+    "question": "Which queue should handle this ticket?",
+    "state": "Customer reports they cannot reset their password and the MFA code never arrives.",
+    "options": [
+      {"id": "billing", "description": "Billing team"},
+      {"id": "identity", "description": "Identity / auth team"},
+      {"id": "network", "description": "Network operations"}
+    ]
+  },
+  "noul_default": {
+    "type": "noul",
+    "question": "Does the customer explicitly request a refund?",
+    "state": "Customer says the delivery was late but still wants to keep the product.",
+    "options": []
+  },
+  "score_severity": {
+    "type": "score",
+    "question": "How severe is this incident?",
+    "state": "Production API latency is 3x baseline for one region; no data loss reported.",
+    "options": [
+      {"id": "0", "description": "informational"},
+      {"id": "1", "description": "low"},
+      {"id": "2", "description": "medium"},
+      {"id": "3", "description": "high"},
+      {"id": "4", "description": "critical"}
+    ]
+  }
+}
