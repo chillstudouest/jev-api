@@ -2,7 +2,8 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-**Engine:** [Von OptionMarker 395M](https://github.com/wfzyx/von) (`wfzyx/von-1.0`, public on Hugging Face).
+**Engine:** [Von OptionMarker 395M](https://github.com/wfzyx/von) (`wfzyx/von-1.0`, public on Hugging Face).  
+Installed from GitHub (`von-sdk @ git+…`) — the PyPI package does not ship the OptionMarker backend yet.
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev; predictions come from Von.
 
