@@ -41,6 +41,9 @@ class FakeEngine(VerdictEngine):
         return
 
     def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
+        import time
+
+        started = time.perf_counter()
         model_name = resolve_request_model(request.model)
         questions = parse_questions(request.questions)
         answers = {}
@@ -75,10 +78,12 @@ class FakeEngine(VerdictEngine):
                 noul = 0.93 if "urgent" in question.instructions.lower() else 0.35
                 answers[qid] = NoulAnswer(noul=noul)
             input_tokens += 50
+        duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
         return SystemOneResponse(
             model=model_name,
             answers=answers,
             usage=Usage(input_tokens=input_tokens, output_tokens=len(answers)),
+            duration_ms=duration_ms,
         )
 
 

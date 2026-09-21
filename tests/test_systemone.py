@@ -23,6 +23,8 @@ def test_choice_two_options_shape(client, auth_headers, jev_fixtures) -> None:
     assert 0.0 <= answer["confidence"] <= 1.0
     assert "usage" in body and body["usage"]["input_tokens"] > 0
     assert body["usage"]["output_tokens"] >= 0
+    assert isinstance(body["duration_ms"], (int, float))
+    assert body["duration_ms"] >= 0
 
 
 def test_choice_three_options(client, auth_headers, jev_fixtures) -> None:

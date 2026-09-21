@@ -127,14 +127,18 @@ class VerdictEngine:
         if not self.status.ready or self._von is None:
             raise RuntimeError(self.status.not_ready_message())
 
+        import time
+
         model_name = resolve_request_model(request.model)
         parse_questions(request.questions)
 
+        started = time.perf_counter()
         von_resp = self._von.evaluate(
             state=request.state,
             questions=request.questions,
             model=model_name,
         )
+        duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
 
         answers: dict[str, Answer] = {}
         for qid, ans in von_resp.answers.items():
@@ -154,4 +158,9 @@ class VerdictEngine:
             input_tokens=int(getattr(usage_raw, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage_raw, "output_tokens", 0) or 0),
         )
-        return SystemOneResponse(model=model_name, answers=answers, usage=usage)
+        return SystemOneResponse(
+            model=model_name,
+            answers=answers,
+            usage=usage,
+            duration_ms=duration_ms,
+        )

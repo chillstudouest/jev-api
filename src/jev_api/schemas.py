@@ -157,6 +157,7 @@ class SystemOneResponse(BaseModel):
     model: str
     answers: dict[str, Answer]
     usage: Usage
+    duration_ms: float = Field(description="Server-side inference duration in milliseconds")
 
 
 class HealthResponse(BaseModel):
