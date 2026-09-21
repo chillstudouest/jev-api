@@ -41,7 +41,13 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         _app.state.settings = settings
         _app.state.engine = engine
         if settings.download_on_startup:
-            engine.start_background_load()
+            # Block until Von is loaded so Traefik does not route traffic early.
+            # First boot downloads ~1.5GB — Coolify start_period must be long enough.
+            logger.info("Loading Von model before accepting traffic…")
+            try:
+                engine.load_blocking()
+            except Exception:
+                logger.exception("Startup model load failed — /ready will report error")
         yield
 
     app = FastAPI(
@@ -67,7 +73,11 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         if eng.status.ready:
             return ReadyResponse(status="ready", ready=True)
         if eng.status.loading:
-            return ReadyResponse(status="loading", ready=False, detail="Model is loading")
+            return ReadyResponse(
+                status="loading",
+                ready=False,
+                detail="Downloading / initializing Von OptionMarker (~1.5GB). Retry shortly.",
+            )
         if eng.status.error:
             return ReadyResponse(status="error", ready=False, detail=eng.status.error)
         return ReadyResponse(status="loading", ready=False, detail="Model not started")
@@ -103,7 +113,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
     def _systemone(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
         eng: VerdictEngine = request.app.state.engine
         if not eng.status.ready:
-            raise_usage(503, eng.status.error or "Model is not ready", error_type="server_error")
+            raise_usage(503, eng.status.not_ready_message(), error_type="server_error")
         try:
             return eng.systemone(payload)
         except ApiUsageError as exc:

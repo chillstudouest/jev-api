@@ -34,6 +34,16 @@ class EngineStatus:
     device: str = "cpu"
     backend: str = "option-marker"
 
+    def not_ready_message(self) -> str:
+        if self.error:
+            return f"Model failed to load: {self.error}"
+        if self.loading:
+            return (
+                "Model is still loading (downloading / initializing Von OptionMarker ~1.5GB). "
+                "Poll GET /ready until ready=true."
+            )
+        return "Model is not ready"
+
 
 class VerdictEngine:
     """Thin wrapper: load Von once, expose systemone() for the HTTP layer."""
@@ -48,9 +58,17 @@ class VerdictEngine:
         thread = threading.Thread(target=self._safe_load, name="von-model-load", daemon=True)
         thread.start()
 
+    def load_blocking(self) -> None:
+        """Load in the current thread (used during FastAPI lifespan startup)."""
+        self._safe_load()
+        if not self.status.ready:
+            raise RuntimeError(self.status.not_ready_message())
+
     def _safe_load(self) -> None:
         with self._load_lock:
-            if self.status.ready or self.status.loading:
+            if self.status.ready:
+                return
+            if self.status.loading:
                 return
             self.status.loading = True
             self.status.error = None
@@ -60,17 +78,17 @@ class VerdictEngine:
                 logger.exception("Von model load failed")
                 self.status.error = str(exc)
                 self.status.ready = False
+                self._von = None
             finally:
                 self.status.loading = False
 
     def load(self) -> None:
         settings = self.settings
-        # Hugging Face cache dir (public wfzyx/von-1.0)
         cache = str(settings.model_cache_dir)
         os.makedirs(cache, exist_ok=True)
-        os.environ.setdefault("HF_HOME", cache)
-        os.environ.setdefault("TRANSFORMERS_CACHE", cache)
-        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", cache)
+        os.environ["HF_HOME"] = cache
+        os.environ["TRANSFORMERS_CACHE"] = cache
+        os.environ["HUGGINGFACE_HUB_CACHE"] = cache
         if settings.hf_token:
             os.environ["HF_TOKEN"] = settings.hf_token
             os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.hf_token
@@ -80,10 +98,9 @@ class VerdictEngine:
 
         from von.engine import VonEngine
 
-        logger.info("Loading Von backend=%s device=%s", settings.von_backend, settings.device)
+        logger.info("Loading Von backend=%s device=%s cache=%s", settings.von_backend, settings.device, cache)
         von = VonEngine(backend_name=settings.von_backend, device=settings.device)
 
-        # Force weight download + load once at startup (not on first request).
         backend = von.backend
         if hasattr(backend, "_get_model"):
             model = backend._get_model()
@@ -108,9 +125,8 @@ class VerdictEngine:
 
     def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
         if not self.status.ready or self._von is None:
-            raise RuntimeError(self.status.error or "Model is not ready")
+            raise RuntimeError(self.status.not_ready_message())
 
-        # Validate Jev question shapes (raises ApiUsageError / ValidationError).
         model_name = resolve_request_model(request.model)
         parse_questions(request.questions)
 
@@ -129,7 +145,6 @@ class VerdictEngine:
             elif qtype == "score":
                 answers[qid] = ScoreAnswer.model_validate(data)
             elif qtype == "noul":
-                # Strip confidence if a backend ever adds it — Jev Noul has none.
                 answers[qid] = NoulAnswer(noul=float(data["noul"]))
             else:
                 raise ValueError(f"Unknown answer type from Von: {qtype!r}")
@@ -139,5 +154,4 @@ class VerdictEngine:
             input_tokens=int(getattr(usage_raw, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage_raw, "output_tokens", 0) or 0),
         )
-        # Echo the client-facing Jev model alias (protocol compat), not the internal Von name.
         return SystemOneResponse(model=model_name, answers=answers, usage=usage)
