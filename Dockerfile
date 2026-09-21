@@ -38,8 +38,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     DOWNLOAD_ON_STARTUP=true
 
+# curl: required by Coolify/Traefik container healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
+      curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin jev \
     && mkdir -p /data/models \
