@@ -40,14 +40,11 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         _app.state.settings = settings
         _app.state.engine = engine
+        # Background load so /health becomes ready immediately (Coolify).
+        # Poll GET /ready before calling /v1/systemone.
         if settings.download_on_startup:
-            # Block until Von is loaded so Traefik does not route traffic early.
-            # First boot downloads ~1.5GB — Coolify start_period must be long enough.
-            logger.info("Loading Von model before accepting traffic…")
-            try:
-                engine.load_blocking()
-            except Exception:
-                logger.exception("Startup model load failed — /ready will report error")
+            logger.info("Starting Von model load in background…")
+            engine.start_background_load()
         yield
 
     app = FastAPI(

@@ -38,10 +38,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     DOWNLOAD_ON_STARTUP=true
 
-# curl: required by Coolify/Traefik container healthchecks
+# Coolify Dockerfile healthchecks need curl AND/OR wget in the image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      wget \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin jev \
     && mkdir -p /data/models \
