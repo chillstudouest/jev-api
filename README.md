@@ -118,9 +118,8 @@ python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model agent-jev --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model semif --n 5
 
-# Sequential in-process compare (unloads each engine after its run)
-PYTHONPATH=src python scripts/compare_models.py --repeats 5 --out /tmp/compare.json
-PYTHONPATH=src python scripts/compare_models.py --models semif --repeats 1 --warmup 0 --out /tmp/semif.json
+# Sequential in-process compare on 100 public JevBench decisions (not full JevBench score)
+PYTHONPATH=src python scripts/compare_models.py --limit 100 --repeats 1 --warmup 1 --out /tmp/compare-100.json
 ```
 
 First Laya call may download weights and take minutes; later calls are in-process.

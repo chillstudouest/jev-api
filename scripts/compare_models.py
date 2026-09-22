@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Sequential von / laya / agent-jev / semif benchmark on identical System One requests."""
+"""Sequential engine benchmark on identical System One requests.
+
+Default suite: first N public JevBench decisions (easy + original), MIT.
+Not a full JevBench score (no hard tier / calibration / cost axes).
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ import argparse
 import json
 import statistics
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -14,73 +19,66 @@ from jev_api.config import Settings
 from jev_api.engine import VerdictEngine
 from jev_api.schemas import ChoiceAnswer, NoulAnswer, ScoreAnswer, SystemOneRequest, resolve_engine
 
-CASES: list[dict[str, Any]] = [
-    {
-        "id": "billing_triage",
-        "state": "Charged twice for September and cancelling Friday unless refunded.",
-        "questions": {
-            "route": {
-                "type": "choice",
-                "instructions": "Which team should handle this?",
-                "criteria": {
-                    "billing": "Payments and refunds",
-                    "technical": "Bugs and outages",
-                },
-            },
-            "urgency": {
-                "type": "noul",
-                "instructions": "Does this need a reply today?",
-                "criteria": {"true": "Time-sensitive", "false": "Can wait"},
-            },
-            "severity": {
-                "type": "score",
-                "instructions": "How severe is this?",
-                "criteria": ["Low", "Medium", "High", "Critical"],
-            },
-        },
-        "expected": {
-            "route": "billing",
-            "urgency_min": 0.5,
-            "severity_min": 1.0,
-        },
-    },
-    {
-        "id": "outage",
-        "state": "Production API latency is 3x baseline for one region; no data loss reported.",
-        "questions": {
-            "severity": {
-                "type": "score",
-                "instructions": "How severe is this incident?",
-                "criteria": ["Low", "Medium", "High", "Critical"],
-            },
-            "page_now": {
-                "type": "noul",
-                "instructions": "Should on-call be paged immediately?",
-                "criteria": {"true": "Page now", "false": "Can wait for business hours"},
-            },
-        },
-        "expected": {
-            "severity_min": 1.0,
-            "page_now_min": 0.4,
-        },
-    },
-    {
-        "id": "quote_request",
-        "state": "Customer wants a bathroom renovation quote.",
-        "questions": {
-            "next": {
-                "type": "choice",
-                "instructions": "What should happen next?",
-                "criteria": {
-                    "create_client": "Create a client",
-                    "create_job": "Create a job",
-                    "create_quote": "Create a quote",
-                },
-            }
-        },
-        "expected": {"next": "create_quote"},
-    },
-]
+JEVBENCH_SOURCES = (
+    (
+        "easy.jsonl",
+        "https://raw.githubusercontent.com/fstandhartinger/jevbench/main/datasets/public/easy.jsonl",
+    ),
+    (
+        "original.jsonl",
+        "https://raw.githubusercontent.com/fstandhartinger/jevbench/main/datasets/public/original.jsonl",
+    ),
+)
+
+
+def _download_jevbench(cache_dir: Path) -> list[dict[str, Any]]:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    for name, url in JEVBENCH_SOURCES:
+        path = cache_dir / name
+        if not path.is_file():
+            print(f"Downloading {name}…", flush=True)
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                path.write_bytes(resp.read())
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def _noul_criteria(raw: dict[str, Any]) -> dict[str, str | None]:
+    criteria = raw.get("criteria")
+    if isinstance(criteria, dict) and set(criteria.keys()) == {"true", "false"}:
+        return {
+            "true": criteria.get("true") if isinstance(criteria.get("true"), str) else None,
+            "false": criteria.get("false") if isinstance(criteria.get("false"), str) else None,
+        }
+    # Some rows use yes/no label names; map to System One noul.
+    return {"true": "Yes", "false": "No"}
+
+
+def jevbench_row_to_case(row: dict[str, Any]) -> dict[str, Any]:
+    qid = "q"
+    question = dict(row["question"])
+    qtype = str(question.get("type", "")).strip().lower()
+    if qtype == "noul":
+        question["criteria"] = _noul_criteria(question)
+    case: dict[str, Any] = {
+        "id": str(row["id"]),
+        "family": row.get("family"),
+        "state": row["state"],
+        "questions": {qid: question},
+        "expected": {"qid": qid, "type": qtype, "value": row.get("expected")},
+    }
+    return case
+
+
+def load_cases(limit: int, cache_dir: Path) -> list[dict[str, Any]]:
+    rows = _download_jevbench(cache_dir)
+    cases = [jevbench_row_to_case(row) for row in rows[:limit]]
+    if len(cases) < limit:
+        print(f"Warning: only {len(cases)} public rows available (requested {limit})", flush=True)
+    return cases
 
 
 def _summarize_answers(answers: dict[str, Any]) -> dict[str, Any]:
@@ -97,27 +95,44 @@ def _summarize_answers(answers: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _choice_from_score(ans: ScoreAnswer) -> str:
+    if ans.probabilities:
+        return max(ans.probabilities, key=ans.probabilities.get)  # type: ignore[arg-type]
+    return str(int(round(ans.score)))
+
+
 def _quality(case: dict[str, Any], answers: dict[str, Any]) -> dict[str, Any]:
-    expected = case.get("expected", {})
-    checks: dict[str, bool] = {}
-    if "route" in expected and "route" in answers and isinstance(answers["route"], ChoiceAnswer):
-        checks["route_billing"] = answers["route"].choice == expected["route"]
-    if "next" in expected and "next" in answers and isinstance(answers["next"], ChoiceAnswer):
-        checks["next_quote"] = answers["next"].choice == expected["next"]
-    if "urgency_min" in expected and "urgency" in answers and isinstance(answers["urgency"], NoulAnswer):
-        checks["urgency_high"] = answers["urgency"].noul >= float(expected["urgency_min"])
-    if "severity_min" in expected and "severity" in answers and isinstance(answers["severity"], ScoreAnswer):
-        checks["severity_raised"] = answers["severity"].score >= float(expected["severity_min"])
-    if "page_now_min" in expected and "page_now" in answers and isinstance(answers["page_now"], NoulAnswer):
-        checks["page_now"] = answers["page_now"].noul >= float(expected["page_now_min"])
-    return {
-        "passed": sum(1 for ok in checks.values() if ok),
-        "total": len(checks),
-        "checks": checks,
-    }
+    expected = case.get("expected") or {}
+    qid = str(expected.get("qid", "q"))
+    qtype = str(expected.get("type", ""))
+    value = expected.get("value")
+    ans = answers.get(qid)
+    ok = False
+    detail = ""
+    if qtype == "choice" and isinstance(ans, ChoiceAnswer):
+        ok = ans.choice == str(value)
+        detail = f"got={ans.choice} want={value}"
+    elif qtype == "noul" and isinstance(ans, NoulAnswer):
+        want_yes = str(value).strip().lower() in {"yes", "true", "1"}
+        pred_yes = ans.noul >= 0.5
+        ok = pred_yes == want_yes
+        detail = f"noul={ans.noul:.3f} want={'yes' if want_yes else 'no'}"
+    elif qtype == "score" and isinstance(ans, ScoreAnswer):
+        pred = _choice_from_score(ans)
+        ok = pred == str(value)
+        detail = f"argmax={pred} score={ans.score:.3f} want={value}"
+    else:
+        detail = f"missing answer for {qid}/{qtype}"
+    return {"passed": 1 if ok else 0, "total": 1, "ok": ok, "detail": detail}
 
 
-def run_model(engine: VerdictEngine, model: str, repeats: int, warmup: int) -> dict[str, Any]:
+def run_model(
+    engine: VerdictEngine,
+    model: str,
+    cases: list[dict[str, Any]],
+    repeats: int,
+    warmup: int,
+) -> dict[str, Any]:
     engine_name = resolve_engine(model)
     if engine_name == "von":
         engine.load_blocking()
@@ -133,11 +148,16 @@ def run_model(engine: VerdictEngine, model: str, repeats: int, warmup: int) -> d
     latencies: list[float] = []
     case_rows: list[dict[str, Any]] = []
     quality_scores: list[float] = []
+    passed = 0
+    total = 0
 
-    for case in CASES:
-        request = SystemOneRequest(state=case["state"], questions=case["questions"], model=model)
+    if warmup > 0 and cases:
+        warm = SystemOneRequest(state=cases[0]["state"], questions=cases[0]["questions"], model=model)
         for _ in range(warmup):
-            engine.systemone(request)
+            engine.systemone(warm)
+
+    for index, case in enumerate(cases, start=1):
+        request = SystemOneRequest(state=case["state"], questions=case["questions"], model=model)
         last = None
         times: list[float] = []
         for _ in range(repeats):
@@ -147,11 +167,14 @@ def run_model(engine: VerdictEngine, model: str, repeats: int, warmup: int) -> d
         assert last is not None
         latencies.extend(times)
         quality = _quality(case, last.answers)
+        passed += quality["passed"]
+        total += quality["total"]
         if quality["total"]:
             quality_scores.append(quality["passed"] / quality["total"])
         case_rows.append(
             {
                 "id": case["id"],
+                "family": case.get("family"),
                 "duration_ms": last.duration_ms,
                 "client_ms": {
                     "p50": round(statistics.median(times), 2),
@@ -161,33 +184,48 @@ def run_model(engine: VerdictEngine, model: str, repeats: int, warmup: int) -> d
                 "quality": quality,
             }
         )
+        if index % 10 == 0 or index == len(cases):
+            print(
+                f"  [{model}] {index}/{len(cases)} "
+                f"acc={passed / total:.3f} last_ms={times[-1]:.0f}",
+                flush=True,
+            )
 
     latencies.sort()
     return {
         "model": model,
         "engine": engine_name,
+        "n_cases": len(cases),
         "repeats_per_case": repeats,
-        "cases": case_rows,
+        "accuracy": round(passed / total, 4) if total else None,
+        "passed": passed,
+        "total_checks": total,
         "latency_ms": {
             "p50": round(statistics.median(latencies), 2),
             "mean": round(statistics.fmean(latencies), 2),
+            "p95": round(latencies[int(0.95 * (len(latencies) - 1))], 2),
             "min": round(min(latencies), 2),
             "max": round(max(latencies), 2),
         },
         "quality_rate": round(statistics.fmean(quality_scores), 3) if quality_scores else None,
+        "cases": case_rows,
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models", default="von,laya,agent-jev")
-    parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--models", default="von,laya,agent-jev,semif")
+    parser.add_argument("--limit", type=int, default=100, help="Number of JevBench public decisions")
+    parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--cache-dir", default="./data/models")
+    parser.add_argument("--jevbench-dir", default="./data/jevbench")
     parser.add_argument("--out", default="")
-    parser.add_argument("--unload", action="store_true", default=True)
     parser.add_argument("--keep-loaded", action="store_true")
     args = parser.parse_args()
+
+    cases = load_cases(args.limit, Path(args.jevbench_dir))
+    print(f"Loaded {len(cases)} cases", flush=True)
 
     settings = Settings(
         jev_api_key="compare",
@@ -199,9 +237,19 @@ def main() -> None:
     results: list[dict[str, Any]] = []
     for model in models:
         print(f"=== {model} ===", flush=True)
-        row = run_model(engine, model, args.repeats, args.warmup)
+        row = run_model(engine, model, cases, args.repeats, args.warmup)
         results.append(row)
-        print(json.dumps({"model": model, "latency_ms": row["latency_ms"], "quality_rate": row["quality_rate"]}))
+        print(
+            json.dumps(
+                {
+                    "model": model,
+                    "n_cases": row["n_cases"],
+                    "accuracy": row["accuracy"],
+                    "latency_ms": row["latency_ms"],
+                }
+            ),
+            flush=True,
+        )
         if not args.keep_loaded:
             engine.unload(resolve_engine(model))
             import gc
@@ -215,11 +263,43 @@ def main() -> None:
             except ImportError:
                 pass
 
-    report = {"models": results}
+    report = {
+        "suite": "jevbench-public-prefix",
+        "n_cases": len(cases),
+        "note": (
+            "Accuracy on first N public JevBench decisions (easy+original). "
+            "Not the official JevBench Score (missing hard/calibration/speed/cost axes)."
+        ),
+        "models": [
+            {
+                "model": row["model"],
+                "engine": row["engine"],
+                "n_cases": row["n_cases"],
+                "accuracy": row["accuracy"],
+                "passed": row["passed"],
+                "total_checks": row["total_checks"],
+                "latency_ms": row["latency_ms"],
+                "cases": row["cases"],
+            }
+            for row in results
+        ],
+    }
     text = json.dumps(report, indent=2)
-    print(text)
+    summary = {
+        "n_cases": len(cases),
+        "models": [
+            {
+                "model": row["model"],
+                "accuracy": row["accuracy"],
+                "latency_ms": row["latency_ms"],
+            }
+            for row in results
+        ],
+    }
+    print(json.dumps(summary, indent=2), flush=True)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
+        print(f"Wrote {args.out}", flush=True)
 
 
 if __name__ == "__main__":
