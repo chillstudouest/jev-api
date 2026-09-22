@@ -65,8 +65,9 @@ class Settings(BaseSettings):
     preload_semif: bool = Field(default=False, alias="PRELOAD_SEMIF")
 
     # djev (Maisa, diffusion-gemma) — Davipar/djev-dev structured POST /v1/request.
-    # Default points at Maisa hosted API; override for self-hosted djev-dev.
-    djev_base_url: str = Field(default="https://api.djev.dev", alias="DJEV_BASE_URL")
+    # Self-hosted: set DJEV_BASE_URL to your djev-dev (no key by default).
+    # Hosted Maisa only: https://api.djev.dev + DJEV_API_KEY.
+    djev_base_url: str = Field(default="http://127.0.0.1:8000", alias="DJEV_BASE_URL")
     djev_api_key: str | None = Field(default=None, alias="DJEV_API_KEY")
     djev_remote_model: str = Field(default="djev", alias="DJEV_REMOTE_MODEL")
     djev_timeout: float = Field(default=120.0, alias="DJEV_TIMEOUT")

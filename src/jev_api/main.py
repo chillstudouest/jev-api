@@ -146,7 +146,8 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "Switch engine with body.model: von (default), laya, agent-jev, semif, or djev. "
                     "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
                     "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB). "
-                    "djev proxies Davipar/djev-dev (Maisa DiffusionGemma) via DJEV_BASE_URL."
+                    "djev proxies Davipar/djev-dev (Maisa DiffusionGemma). "
+                    "Self-hosted needs no API key; DJEV_API_KEY is only for api.djev.dev."
                 ),
             },
         )

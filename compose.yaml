@@ -21,7 +21,7 @@ services:
       SEMIF_MODE: ${SEMIF_MODE:-auto}
       PRELOAD_SEMIF: ${PRELOAD_SEMIF:-false}
       SEMIF_SRC: /opt/semif
-      DJEV_BASE_URL: ${DJEV_BASE_URL:-https://api.djev.dev}
+      DJEV_BASE_URL: ${DJEV_BASE_URL:-http://127.0.0.1:8000}
       DJEV_API_KEY: ${DJEV_API_KEY:-}
       DJEV_REMOTE_MODEL: ${DJEV_REMOTE_MODEL:-djev}
       PRELOAD_DJEV: ${PRELOAD_DJEV:-false}

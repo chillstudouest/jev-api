@@ -9,9 +9,10 @@ Inference path (djev-dev defaults):
 
 NOT the experimental "djev thinking" full-generation path (JevBench #21).
 
-Local djev-dev needs a large GPU (BF16 DiffusionGemma). On the 8 GiB CPU VPS
-this wrapper proxies to a remote endpoint: hosted https://api.djev.dev (Maisa)
-or a self-hosted djev-dev base URL.
+Local djev-dev (Apache-2.0) needs **no API key** by default. An API key is only
+for Maisa's hosted https://api.djev.dev. On the 8 GiB CPU VPS, DiffusionGemma-26B
+does not fit — point DJEV_BASE_URL at a self-hosted GPU instance, or use Maisa
+with DJEV_API_KEY.
 """
 
 from __future__ import annotations
@@ -49,8 +50,8 @@ def load_djev_client(settings: Settings) -> tuple[DjevClient, int | None, str]:
     base = (settings.djev_base_url or "").strip().rstrip("/")
     if not base:
         raise RuntimeError(
-            "DJEV_BASE_URL is empty. Point it at https://api.djev.dev "
-            "(set DJEV_API_KEY) or a self-hosted Davipar/djev-dev instance."
+            "DJEV_BASE_URL is empty. Point it at a self-hosted Davipar/djev-dev "
+            "instance (no API key by default), or at https://api.djev.dev with DJEV_API_KEY."
         )
     remote_model = (settings.djev_remote_model or "djev").strip()
     if remote_model not in DJEV_REMOTE_MODELS:
@@ -86,7 +87,8 @@ def _probe_ready(client: DjevClient) -> None:
             if response.status_code == 401:
                 raise RuntimeError(
                     "djev rejected the API key (HTTP 401). "
-                    "Set DJEV_API_KEY for hosted api.djev.dev (Maisa)."
+                    "Self-hosted djev-dev needs no key unless DJEV_API_KEY is set on that server. "
+                    "Hosted api.djev.dev requires DJEV_API_KEY."
                 )
             if response.status_code >= 400:
                 logger.warning(
@@ -161,8 +163,9 @@ def evaluate_djev(client: DjevClient, state: object, questions: dict[str, Any]) 
 
     if response.status_code == 401:
         raise RuntimeError(
-            "djev rejected the API key (HTTP 401). "
-            "Set DJEV_API_KEY for hosted api.djev.dev (Maisa, diffusion-gemma)."
+            "djev rejected credentials (HTTP 401). "
+            "Self-hosted Davipar/djev-dev: leave DJEV_API_KEY unset (local default has no auth). "
+            "Maisa hosted api.djev.dev: set DJEV_API_KEY from an invitation."
         )
     if response.status_code == 402:
         raise RuntimeError("djev insufficient credits (HTTP 402)")

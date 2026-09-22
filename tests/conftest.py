@@ -68,7 +68,7 @@ class FakeEngine(VerdictEngine):
             ready=True,
             loading=False,
             parameters=None,
-            backbone="https://api.djev.dev",
+            backbone="http://127.0.0.1:8000",
             device="remote",
             backend="djev-http",
             name="djev",

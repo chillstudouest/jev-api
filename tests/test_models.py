@@ -274,7 +274,7 @@ def test_engine_dispatches_djev_without_remote(tmp_path) -> None:
         jev_api_key="test",
         download_on_startup=False,
         model_cache_dir=tmp_path / "models",
-        djev_base_url="https://api.djev.dev",
+        djev_base_url="http://127.0.0.1:8000",
     )
     engine = VerdictEngine(settings)
     engine.von_status.ready = True

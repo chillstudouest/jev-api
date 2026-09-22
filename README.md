@@ -35,16 +35,27 @@ A later win for RAM/CPU/latency on the VPS is the **Rust/Candle** runtime ([`lay
 
 ## djev (Maisa, diffusion-gemma)
 
-This is the JevBench row **djev (Maisa, diffusion-gemma)** — open stack [Davipar/djev-dev](https://github.com/Davipar/djev-dev) over Google **DiffusionGemma-26B-A4B-it**.
+This is the JevBench row **djev (Maisa, diffusion-gemma)** — open stack [Davipar/djev-dev](https://github.com/Davipar/djev-dev) (Apache-2.0) over Google **DiffusionGemma-26B-A4B-it**.
 
 - Structured one-step read: `enable_thinking=false`, `diffusion_max_steps=1`, `read_only=true`
 - Wire: `POST /v1/request` (same noul / choice / score shapes)
 - **Not** the experimental “djev thinking” full-generation path
 
-Local djev-dev needs a large NVIDIA GPU (BF16). On an 8 GiB CPU VPS, jev-api **proxies** to:
+**No API key for self-hosted djev-dev** (local default has no auth). `DJEV_API_KEY` is only for Maisa’s hosted `https://api.djev.dev` (invitation).
 
-- hosted Maisa: `DJEV_BASE_URL=https://api.djev.dev` + `DJEV_API_KEY=…`
-- or your own `docker run` of djev-dev: `DJEV_BASE_URL=http://djev-model:8000`
+Local djev-dev needs a large NVIDIA GPU (BF16). An 8 GiB CPU VPS cannot load DiffusionGemma — run djev-dev on a GPU host, then point jev-api at it:
+
+```bash
+# On the GPU machine (from Davipar/djev-dev README):
+docker run -d --name djev-model --gpus device=0 --shm-size=16g -p 8000:8000 djev-local
+docker exec -d djev-model python3 -m djev --host 0.0.0.0 --port 8000
+
+# On jev-api:
+DJEV_BASE_URL=http://<gpu-host>:8000
+# DJEV_API_KEY unset
+```
+
+Optional hosted Maisa: `DJEV_BASE_URL=https://api.djev.dev` + `DJEV_API_KEY=…`.
 
 ## Endpoints
 
@@ -72,7 +83,7 @@ Accepted `model` values:
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
 - AgentJev **`aimeigaoshou/agent-jev`** (~1.2 GB) plus Qwen3-0.6B skeleton — lazy-loaded unless `PRELOAD_AGENTJEV=true`
 - SemIf **`Qwen/Qwen3.5-4B`** — GPU/MPS uses official SemIf torch (BF16 ~8 GB). CPU uses llama.cpp + `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (~3 GB). Lazy-loaded unless `PRELOAD_SEMIF=true`. Install `pip install -e ".[semif]"` for the CPU path.
-- djev — no local DiffusionGemma weights in this image. HTTP client to Maisa / self-hosted djev-dev.
+- djev — no DiffusionGemma weights in this image. HTTP client to **self-hosted djev-dev** (no key) or Maisa hosted (key).
 
 Persist `/data/models` across restarts. Do not keep several local engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
 
@@ -84,7 +95,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev]"
 # optional CPU SemIf (llama.cpp):
 # pip install -e ".[semif]"
-cp .env.example .env   # set JEV_API_KEY; for djev also DJEV_API_KEY
+cp .env.example .env   # set JEV_API_KEY; for djev set DJEV_BASE_URL to your djev-dev
 python -m uvicorn jev_api.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
@@ -142,7 +153,7 @@ PYTHONPATH=src python scripts/compare_models.py --repeats 5 --out /tmp/compare.j
 PYTHONPATH=src python scripts/compare_models.py --models djev --repeats 1 --warmup 0 --out /tmp/djev.json
 ```
 
-First Laya / SemIf call may download weights and take minutes; later calls are in-process. djev needs `DJEV_API_KEY` (hosted) or a reachable self-hosted djev-dev.
+First Laya / SemIf call may download weights and take minutes; later calls are in-process. djev needs a reachable **self-hosted djev-dev** (`DJEV_BASE_URL`, no key) or Maisa hosted + `DJEV_API_KEY`.
 
 ## Env
 
@@ -163,10 +174,10 @@ First Laya / SemIf call may download weights and take minutes; later calls are i
 | `SEMIF_MODE` | `auto` | `direct` per question, `shared` prefix reuse |
 | `SEMIF_GGUF_REPO` / `SEMIF_GGUF_FILE` | bartowski Q4_K_M | CPU weights |
 | `PRELOAD_SEMIF` | `false` | Load SemIf at startup |
-| `DJEV_BASE_URL` | `https://api.djev.dev` | Maisa hosted or self-hosted djev-dev |
-| `DJEV_API_KEY` | — | Required for hosted Maisa API |
+| `DJEV_BASE_URL` | `http://127.0.0.1:8000` | Self-hosted Davipar/djev-dev (no key). Or `https://api.djev.dev` |
+| `DJEV_API_KEY` | — | **Only** for Maisa hosted API — not required for open-source djev-dev |
 | `DJEV_REMOTE_MODEL` | `djev` | `djev` / `djev-latest` / `djev-0.1` |
-| `PRELOAD_DJEV` | `false` | Probe djev `/ready` at startup |
+| `PRELOAD_DJEV` | `false` | Probe djev `/ready` or `/health` at startup |
 | `HF_TOKEN` | — | Optional |
 | `MODEL_CACHE_DIR` | `/data/models` | Persist volume |
 | `JEV_DEVICE` | `cpu` | |
