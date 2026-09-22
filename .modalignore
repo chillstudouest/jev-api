@@ -1,0 +1,9 @@
+# Modal ignore — excludes local junk from the automatic source mount.
+.venv
+.git
+.pytest_cache
+__pycache__
+*.pyc
+tests
+data
+*.egg-info
