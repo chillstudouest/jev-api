@@ -14,7 +14,7 @@ def test_choice_two_options_shape(client, auth_headers, jev_fixtures) -> None:
     response = _post(client, auth_headers, fx["request"])
     assert response.status_code == 200
     body = response.json()
-    assert body["model"] == "jev-1.13.0"
+    assert body["model"] == "jev-1.13.0"  # fixture still sends the Jev alias
     answer = body["answers"]["route"]
     assert answer["type"] == "choice"
     assert answer["choice"] in fx["constraints"]["route_choice_in"]
@@ -138,16 +138,51 @@ def test_api_v1_alias(client, auth_headers, jev_fixtures) -> None:
     assert "route" in response.json()["answers"]
 
 
+def test_laya_model_switch(client, auth_headers) -> None:
+    payload = {
+        "state": "Charged twice for September and cancelling Friday unless refunded.",
+        "model": "laya",
+        "questions": {
+            "route": {
+                "type": "choice",
+                "instructions": "Which team should handle this?",
+                "criteria": {"billing": "Payments and refunds", "technical": "Bugs and outages"},
+            }
+        },
+    }
+    body = _post(client, auth_headers, payload).json()
+    assert body["model"] == "laya"
+    assert body["answers"]["route"]["type"] == "choice"
+    assert body["answers"]["route"]["choice"] in {"billing", "technical"}
+
+
+def test_default_model_is_von(client, auth_headers) -> None:
+    payload = {
+        "state": "x",
+        "questions": {
+            "route": {
+                "type": "choice",
+                "instructions": "Which?",
+                "criteria": {"a": "A", "b": "B"},
+            }
+        },
+    }
+    body = _post(client, auth_headers, payload).json()
+    assert body["model"] == "von"
+
+
 def test_model_info(client, auth_headers) -> None:
     body = client.get("/v1/model", headers=auth_headers).json()
     assert body["protocol"] == "jev-systemone"
     assert body["engine"] == "von-option-marker-395m"
-    assert "jev-1.13.0" in body["accepted_models"]
+    assert "von" in body["accepted_models"]
+    assert "laya" in body["accepted_models"]
+    assert body["extras"]["default_model"] == "von"
 
 
 @pytest.mark.parametrize(
     "model",
-    ["jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
+    ["von", "laya", "jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
 )
 def test_accepted_model_aliases(client, auth_headers, model) -> None:
     payload = {
@@ -163,4 +198,4 @@ def test_accepted_model_aliases(client, auth_headers, model) -> None:
     if model is not None:
         payload["model"] = model
     body = _post(client, auth_headers, payload).json()
-    assert body["model"] == (model or "jev-1.13.0")
+    assert body["model"] == (model or "von")

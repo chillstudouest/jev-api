@@ -28,13 +28,23 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "jev"
 class FakeEngine(VerdictEngine):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
-        self.status = EngineStatus(
+        self.von_status = EngineStatus(
             ready=True,
             loading=False,
             parameters=395_000_000,
             backbone="wfzyx/von-1.0",
             device="cpu",
-            backend="option-marker",
+            backend="von",
+            name="von",
+        )
+        self.laya_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=421_000_000,
+            backbone="convaiinnovations/laya",
+            device="cpu",
+            backend="laya",
+            name="laya",
         )
 
     def start_background_load(self) -> None:

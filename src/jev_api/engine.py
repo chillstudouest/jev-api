@@ -1,10 +1,11 @@
-"""Von 395M (OptionMarker) engine behind the Jev-compatible HTTP contract."""
+"""Von + Laya engines behind the Jev-compatible HTTP contract."""
 
 from __future__ import annotations
 
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,6 +19,7 @@ from jev_api.schemas import (
     SystemOneResponse,
     Usage,
     parse_questions,
+    resolve_engine,
     resolve_request_model,
 )
 
@@ -32,57 +34,102 @@ class EngineStatus:
     parameters: int | None = None
     backbone: str = "wfzyx/von-1.0"
     device: str = "cpu"
-    backend: str = "option-marker"
+    backend: str = "von"
+    name: str = "von"
 
     def not_ready_message(self) -> str:
+        label = "Von OptionMarker" if self.name == "von" else "Laya"
+        size = "~1.5GB" if self.name == "von" else "~0.8GB"
         if self.error:
-            return f"Model failed to load: {self.error}"
+            return f"{label} failed to load: {self.error}"
         if self.loading:
             return (
-                "Model is still loading (downloading / initializing Von OptionMarker ~1.5GB). "
-                "Poll GET /ready until ready=true."
+                f"{label} is still loading (downloading / initializing {size}). "
+                "Poll GET /ready or retry shortly."
             )
-        return "Model is not ready"
+        return f"{label} is not ready"
 
 
 class VerdictEngine:
-    """Thin wrapper: load Von once, expose systemone() for the HTTP layer."""
+    """Load Von on startup; load Laya lazily (or via PRELOAD_LAYA)."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.status = EngineStatus(device=settings.device, backend=settings.von_backend)
+        self.von_status = EngineStatus(
+            device=settings.device,
+            backend=settings.von_backend,
+            name="von",
+            backbone=settings.hf_repo,
+        )
+        self.laya_status = EngineStatus(
+            device=settings.device,
+            backend="laya",
+            name="laya",
+            backbone=settings.laya_hf_repo,
+        )
         self._load_lock = threading.Lock()
+        self._laya_lock = threading.Lock()
         self._von: Any = None
+        self._laya: Any = None
+
+    @property
+    def status(self) -> EngineStatus:
+        """Default readiness is Von — existing clients and Coolify keep working."""
+        return self.von_status
 
     def start_background_load(self) -> None:
         thread = threading.Thread(target=self._safe_load, name="von-model-load", daemon=True)
         thread.start()
+        if self.settings.preload_laya:
+            threading.Thread(target=self._safe_load_laya, name="laya-model-load", daemon=True).start()
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
         self._safe_load()
-        if not self.status.ready:
-            raise RuntimeError(self.status.not_ready_message())
+        if not self.von_status.ready:
+            raise RuntimeError(self.von_status.not_ready_message())
+        if self.settings.preload_laya:
+            self._safe_load_laya()
+            if not self.laya_status.ready:
+                raise RuntimeError(self.laya_status.not_ready_message())
 
     def _safe_load(self) -> None:
         with self._load_lock:
-            if self.status.ready:
+            if self.von_status.ready:
                 return
-            if self.status.loading:
+            if self.von_status.loading:
                 return
-            self.status.loading = True
-            self.status.error = None
+            self.von_status.loading = True
+            self.von_status.error = None
             try:
                 self.load()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Von model load failed")
-                self.status.error = str(exc)
-                self.status.ready = False
+                self.von_status.error = str(exc)
+                self.von_status.ready = False
                 self._von = None
             finally:
-                self.status.loading = False
+                self.von_status.loading = False
 
-    def load(self) -> None:
+    def _safe_load_laya(self) -> None:
+        with self._laya_lock:
+            if self.laya_status.ready:
+                return
+            if self.laya_status.loading:
+                return
+            self.laya_status.loading = True
+            self.laya_status.error = None
+            try:
+                self._load_laya()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Laya model load failed")
+                self.laya_status.error = str(exc)
+                self.laya_status.ready = False
+                self._laya = None
+            finally:
+                self.laya_status.loading = False
+
+    def _prepare_hf_cache(self) -> str:
         settings = self.settings
         cache = str(settings.model_cache_dir)
         os.makedirs(cache, exist_ok=True)
@@ -92,14 +139,38 @@ class VerdictEngine:
         if settings.hf_token:
             os.environ["HF_TOKEN"] = settings.hf_token
             os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.hf_token
+        return cache
 
+    def _open_von(self) -> Any:
+        from von.engine import VonEngine
+
+        settings = self.settings
+        candidates: list[str] = []
+        for name in (settings.von_backend, "von", "von-1.1", "option-marker"):
+            if name and name not in candidates:
+                candidates.append(name)
+
+        last_error: Exception | None = None
+        for backend_name in candidates:
+            try:
+                von = VonEngine(backend_name=backend_name, device=settings.device)
+                self.von_status.backend = backend_name
+                return von
+            except ValueError as exc:
+                last_error = exc
+                logger.warning("Von backend %s rejected: %s", backend_name, exc)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Failed to construct VonEngine")
+
+    def load(self) -> None:
+        settings = self.settings
+        cache = self._prepare_hf_cache()
         os.environ["VON_DEVICE"] = settings.device
         os.environ["VON_BACKEND"] = settings.von_backend
 
-        from von.engine import VonEngine
-
         logger.info("Loading Von backend=%s device=%s cache=%s", settings.von_backend, settings.device, cache)
-        von = VonEngine(backend_name=settings.von_backend, device=settings.device)
+        von = self._open_von()
 
         backend = von.backend
         if hasattr(backend, "_get_model"):
@@ -112,55 +183,111 @@ class VerdictEngine:
             params = None
 
         self._von = von
-        self.status.parameters = params
-        self.status.backbone = settings.hf_repo
-        self.status.device = settings.device
-        self.status.backend = settings.von_backend
-        self.status.ready = True
-        self.status.error = None
+        self.von_status.parameters = params
+        self.von_status.backbone = settings.hf_repo
+        self.von_status.device = settings.device
+        self.von_status.ready = True
+        self.von_status.error = None
         if params is not None:
             logger.info("Von ready: %.1fM parameters on %s", params / 1e6, settings.device)
         else:
             logger.info("Von ready on %s", settings.device)
 
+    def _load_laya(self) -> None:
+        from jev_api.laya_runtime import load_laya_agent
+
+        self._prepare_hf_cache()
+        agent, params, backbone = load_laya_agent(self.settings)
+        self._laya = agent
+        self.laya_status.parameters = params
+        self.laya_status.backbone = backbone
+        self.laya_status.device = self.settings.device
+        self.laya_status.backend = "laya"
+        self.laya_status.ready = True
+        self.laya_status.error = None
+
+    def ensure_laya(self) -> None:
+        if self.laya_status.ready and self._laya is not None:
+            return
+        self._safe_load_laya()
+        if not self.laya_status.ready or self._laya is None:
+            raise RuntimeError(self.laya_status.not_ready_message())
+
     def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
-        if not self.status.ready or self._von is None:
-            raise RuntimeError(self.status.not_ready_message())
-
-        import time
-
         model_name = resolve_request_model(request.model)
+        engine_name = resolve_engine(model_name)
         parse_questions(request.questions)
 
         started = time.perf_counter()
-        von_resp = self._von.evaluate(
-            state=request.state,
-            questions=request.questions,
-            model=model_name,
-        )
+        if engine_name == "laya":
+            answers, usage = self._evaluate_laya(request)
+        else:
+            answers, usage = self._evaluate_von(request, model_name)
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
 
-        answers: dict[str, Answer] = {}
-        for qid, ans in von_resp.answers.items():
-            data = ans.model_dump() if hasattr(ans, "model_dump") else dict(ans)
-            qtype = data.get("type")
-            if qtype == "choice":
-                answers[qid] = ChoiceAnswer.model_validate(data)
-            elif qtype == "score":
-                answers[qid] = ScoreAnswer.model_validate(data)
-            elif qtype == "noul":
-                answers[qid] = NoulAnswer(noul=float(data["noul"]))
-            else:
-                raise ValueError(f"Unknown answer type from Von: {qtype!r}")
-
-        usage_raw = von_resp.usage
-        usage = Usage(
-            input_tokens=int(getattr(usage_raw, "input_tokens", 0) or 0),
-            output_tokens=int(getattr(usage_raw, "output_tokens", 0) or 0),
-        )
         return SystemOneResponse(
             model=model_name,
             answers=answers,
             usage=usage,
             duration_ms=duration_ms,
         )
+
+    def _evaluate_von(self, request: SystemOneRequest, model_name: str) -> tuple[dict[str, Answer], Usage]:
+        if not self.von_status.ready or self._von is None:
+            raise RuntimeError(self.von_status.not_ready_message())
+
+        von_resp = self._von.evaluate(
+            state=request.state,
+            questions=request.questions,
+            model=model_name,
+        )
+        answers = answers_from_mapping(von_resp.answers, source="Von")
+        usage_raw = von_resp.usage
+        usage = Usage(
+            input_tokens=int(getattr(usage_raw, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage_raw, "output_tokens", 0) or 0),
+        )
+        return answers, usage
+
+    def _evaluate_laya(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
+        from jev_api.laya_runtime import laya_system_one
+
+        self.ensure_laya()
+        if self._laya is None:
+            raise RuntimeError(self.laya_status.not_ready_message())
+
+        raw = laya_system_one(self._laya, request.state, request.questions)
+        raw_answers = raw.get("answers")
+        if not isinstance(raw_answers, dict):
+            raise ValueError("Laya response is missing answers")
+        answers = answers_from_mapping(raw_answers, source="Laya")
+        usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        usage = Usage(
+            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+        )
+        return answers, usage
+
+
+def answers_from_mapping(raw_answers: object, source: str) -> dict[str, Answer]:
+    if not isinstance(raw_answers, dict):
+        raise ValueError(f"Unknown answer payload from {source}")
+
+    answers: dict[str, Answer] = {}
+    for qid, ans in raw_answers.items():
+        if hasattr(ans, "model_dump"):
+            data = ans.model_dump()
+        elif isinstance(ans, dict):
+            data = dict(ans)
+        else:
+            raise ValueError(f"Unknown answer type from {source}: {type(ans).__name__}")
+        qtype = data.get("type")
+        if qtype == "choice":
+            answers[str(qid)] = ChoiceAnswer.model_validate(data)
+        elif qtype == "score":
+            answers[str(qid)] = ScoreAnswer.model_validate(data)
+        elif qtype == "noul":
+            answers[str(qid)] = NoulAnswer(noul=float(data["noul"]))
+        else:
+            raise ValueError(f"Unknown answer type from {source}: {qtype!r}")
+    return answers

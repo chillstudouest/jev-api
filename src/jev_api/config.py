@@ -17,10 +17,10 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    api_version: str = "1.1.0"
-    model_name: str = "von-option-marker"
+    api_version: str = "1.2.0"
+    model_name: str = "von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von-option-marker"
+    runtime_name: str = "pytorch+von+laya"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -31,10 +31,14 @@ class Settings(BaseSettings):
     hf_repo: str = Field(default="wfzyx/von-1.0", alias="HF_REPO")
 
     model_cache_dir: Path = Field(default=Path("/data/models"), alias="MODEL_CACHE_DIR")
-    # option-marker = Von 395M (ModernBERT-Large). Also: von-1.0 (NLI encoder path).
-    von_backend: str = Field(default="option-marker", alias="VON_BACKEND")
+    # Latest von-sdk accepts von / von-1.1 / latest. Older images used option-marker.
+    von_backend: str = Field(default="von", alias="VON_BACKEND")
     device: str = Field(default="cpu", alias="JEV_DEVICE")
     download_on_startup: bool = Field(default=True, alias="DOWNLOAD_ON_STARTUP")
+
+    laya_hf_repo: str = Field(default="convaiinnovations/laya", alias="LAYA_HF_REPO")
+    laya_subfolder: str | None = Field(default=None, alias="LAYA_SUBFOLDER")
+    preload_laya: bool = Field(default=False, alias="PRELOAD_LAYA")
 
 
 @lru_cache

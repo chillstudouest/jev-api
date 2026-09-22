@@ -7,7 +7,10 @@ services:
       JEV_API_KEY: ${JEV_API_KEY:-dev-key-change-me}
       HF_TOKEN: ${HF_TOKEN:-}
       HF_REPO: ${HF_REPO:-wfzyx/von-1.0}
-      VON_BACKEND: option-marker
+      VON_BACKEND: von
+      LAYA_HF_REPO: ${LAYA_HF_REPO:-convaiinnovations/laya}
+      LAYA_SUBFOLDER: ${LAYA_SUBFOLDER:-}
+      PRELOAD_LAYA: ${PRELOAD_LAYA:-false}
       MODEL_CACHE_DIR: /data/models
       HF_HOME: /data/models
       JEV_DEVICE: cpu

@@ -1,4 +1,4 @@
-"""jev-api — Jev-compatible System One HTTP server powered by Von 395M."""
+"""jev-api — Jev-compatible System One HTTP server (Von + Laya)."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from jev_api.schemas import (
     ReadyResponse,
     SystemOneRequest,
     SystemOneResponse,
+    resolve_engine,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,7 +54,8 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engine: Von OptionMarker 395M (wfzyx/von-1.0)."
+            "Engines: von (default, OptionMarker 395M) or laya (official Python CPU runtime). "
+            "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
     )
@@ -102,15 +104,37 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
             checkpoint_repo=cfg.hf_repo,
             ready=eng.status.ready,
             extras={
-                "von_backend": eng.status.backend,
-                "note": "Protocol-compatible with Jev; predictions come from Von 395M OptionMarker",
+                "default_model": "von",
+                "von_backend": eng.von_status.backend,
+                "von": {
+                    "ready": eng.von_status.ready,
+                    "backend": eng.von_status.backend,
+                    "backbone": eng.von_status.backbone,
+                    "error": eng.von_status.error,
+                },
+                "laya": {
+                    "ready": eng.laya_status.ready,
+                    "backend": eng.laya_status.backend,
+                    "backbone": eng.laya_status.backbone,
+                    "error": eng.laya_status.error,
+                    "runtime": "python+transformers",
+                },
+                "note": (
+                    "Switch engine with body.model: von (default) or laya. "
+                    "laya-mlx is Apple Silicon only; this service uses official laya on CPU."
+                ),
             },
         )
 
     def _systemone(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
         eng: VerdictEngine = request.app.state.engine
-        if not eng.status.ready:
-            raise_usage(503, eng.status.not_ready_message(), error_type="server_error")
+        try:
+            engine_name = resolve_engine(payload.model)
+        except ApiUsageError as exc:
+            raise_usage(400, exc.message, exc.error_type)
+            raise
+        if engine_name == "von" and not eng.von_status.ready:
+            raise_usage(503, eng.von_status.not_ready_message(), error_type="server_error")
         try:
             return eng.systemone(payload)
         except ApiUsageError as exc:
