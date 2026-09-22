@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jev-api"
 version = "1.2.0"
-description = "Jev-compatible System One HTTP API with switchable Von and Laya engines"
+description = "Jev-compatible System One HTTP API with switchable Von, Laya, and AgentJev engines"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
   "huggingface_hub>=0.26.0",
   "von-sdk @ git+https://github.com/wfzyx/von.git",
   "laya>=0.3.5",
+  "safetensors>=0.4.0",
   "httpx>=0.27.0",
 ]
 

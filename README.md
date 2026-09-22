@@ -2,19 +2,21 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Two local engines, switched per request with the JSON `model` field:
+Three local engines, switched per request with the JSON `model` field:
 
 | `model` | Engine | Weights |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
+| **`agent-jev`** | [AgentJev-0.6B](https://huggingface.co/aimeigaoshou/agent-jev) | `aimeigaoshou/agent-jev` + `Qwen/Qwen3-0.6B` |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
 
 ```text
 Client  →  POST /v1/systemone  →  jev-api
-              model=von   →  Von 395M
-              model=laya  →  Laya 421M
+              model=von        →  Von 395M
+              model=laya       →  Laya 421M
+              model=agent-jev  →  AgentJev 0.6B
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -41,15 +43,17 @@ Accepted `model` values:
 
 - **Von:** `von` (default), plus aliases `von-latest`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
+- **AgentJev:** `agent-jev`, plus aliases `agentjev`, `agent-jev-0.6b`
 
-`/ready` stays Von-based so existing deploys keep working. Laya downloads on the first `model=laya` request (or at startup if `PRELOAD_LAYA=true`).
+`/ready` stays Von-based so existing deploys keep working. Laya / AgentJev download on first use (`PRELOAD_LAYA` / `PRELOAD_AGENTJEV` to load at startup).
 
 ## Weights
 
 - Von **`wfzyx/von-1.0`** (~1.5 GB) — loaded at startup into `MODEL_CACHE_DIR`
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
+- AgentJev **`aimeigaoshou/agent-jev`** (~1.2 GB) plus Qwen3-0.6B skeleton — lazy-loaded unless `PRELOAD_AGENTJEV=true`
 
-Persist `/data/models` across restarts. Loading both at once needs headroom (Coolify is set to 8 GiB). Prefer `model=von` only if RAM is tight.
+Persist `/data/models` across restarts. Do not keep all three resident on an 8 GiB VPS; switch one at a time or unload between benchmarks.
 
 ## Local
 
@@ -104,6 +108,10 @@ curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
 ```bash
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
+python scripts/benchmark.py --api-key "$JEV_API_KEY" --model agent-jev --n 20
+
+# Sequential in-process compare (unloads each engine after its run)
+PYTHONPATH=src python scripts/compare_models.py --repeats 5 --out /tmp/compare.json
 ```
 
 First Laya call may download weights and take minutes; later calls are in-process.
@@ -118,13 +126,16 @@ First Laya call may download weights and take minutes; later calls are in-proces
 | `LAYA_HF_REPO` | `convaiinnovations/laya` | Official Laya |
 | `LAYA_SUBFOLDER` | — | e.g. `typed-decisions` or `multilingual` |
 | `PRELOAD_LAYA` | `false` | Load Laya at startup |
+| `AGENTJEV_HF_REPO` | `aimeigaoshou/agent-jev` | AgentJev weights |
+| `AGENTJEV_BACKBONE` | `Qwen/Qwen3-0.6B` | Tokenizer / skeleton |
+| `PRELOAD_AGENTJEV` | `false` | Load AgentJev at startup |
 | `HF_TOKEN` | — | Optional |
 | `MODEL_CACHE_DIR` | `/data/models` | Persist volume |
 | `JEV_DEVICE` | `cpu` | |
 
 ## Resources
 
-Von ~**395M / ~1.5 GB**. Laya English ~**421M / ~0.8 GB**. Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave `PRELOAD_LAYA=false` unless you need both hot.
+Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. AgentJev ~**598M / ~1.2 GB**. Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
 
 ## Tests
 

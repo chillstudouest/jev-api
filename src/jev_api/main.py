@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default, OptionMarker 395M) or laya (official Python CPU runtime). "
+            "Engines: von (default), laya, or agent-jev. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -119,8 +119,15 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.laya_status.error,
                     "runtime": "python+transformers",
                 },
+                "agent-jev": {
+                    "ready": eng.agentjev_status.ready,
+                    "backend": eng.agentjev_status.backend,
+                    "backbone": eng.agentjev_status.backbone,
+                    "error": eng.agentjev_status.error,
+                    "runtime": "qwen3-0.6b+candidate-head",
+                },
                 "note": (
-                    "Switch engine with body.model: von (default) or laya. "
+                    "Switch engine with body.model: von (default), laya, or agent-jev. "
                     "laya-mlx is Apple Silicon only; this service uses official laya on CPU."
                 ),
             },

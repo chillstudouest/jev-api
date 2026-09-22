@@ -16,10 +16,12 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src ./src
 
+RUN git clone --depth 1 https://github.com/malevrigns/agent-jev.git /opt/agent-jev
+
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# CPU wheels only — no CUDA. Von OptionMarker 395M.
+# CPU wheels only — no CUDA.
 RUN pip install --upgrade pip \
  && pip install torch --index-url https://download.pytorch.org/whl/cpu \
  && pip install .
@@ -34,6 +36,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HUGGINGFACE_HUB_CACHE=/data/models \
     VON_BACKEND=von \
     PRELOAD_LAYA=false \
+    PRELOAD_AGENTJEV=false \
+    AGENTJEV_SRC=/opt/agent-jev \
     JEV_DEVICE=cpu \
     HOST=0.0.0.0 \
     PORT=8000 \
@@ -50,12 +54,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chown -R jev:jev /data
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/agent-jev /opt/agent-jev
 
 WORKDIR /app
 COPY --chown=jev:jev src ./src
 COPY --chown=jev:jev pyproject.toml README.md ./
 
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app/src:/opt/agent-jev
 
 USER jev
 EXPOSE 8000

@@ -38,8 +38,12 @@ class EngineStatus:
     name: str = "von"
 
     def not_ready_message(self) -> str:
-        label = "Von OptionMarker" if self.name == "von" else "Laya"
-        size = "~1.5GB" if self.name == "von" else "~0.8GB"
+        labels = {
+            "von": ("Von OptionMarker", "~1.5GB"),
+            "laya": ("Laya", "~0.8GB"),
+            "agent-jev": ("AgentJev-0.6B", "~1.2GB"),
+        }
+        label, size = labels.get(self.name, (self.name, "weights"))
         if self.error:
             return f"{label} failed to load: {self.error}"
         if self.loading:
@@ -67,10 +71,18 @@ class VerdictEngine:
             name="laya",
             backbone=settings.laya_hf_repo,
         )
+        self.agentjev_status = EngineStatus(
+            device=settings.device,
+            backend="agent-jev",
+            name="agent-jev",
+            backbone=settings.agentjev_hf_repo,
+        )
         self._load_lock = threading.Lock()
         self._laya_lock = threading.Lock()
+        self._agentjev_lock = threading.Lock()
         self._von: Any = None
         self._laya: Any = None
+        self._agentjev: Any = None
 
     @property
     def status(self) -> EngineStatus:
@@ -82,6 +94,10 @@ class VerdictEngine:
         thread.start()
         if self.settings.preload_laya:
             threading.Thread(target=self._safe_load_laya, name="laya-model-load", daemon=True).start()
+        if self.settings.preload_agentjev:
+            threading.Thread(
+                target=self._safe_load_agentjev, name="agentjev-model-load", daemon=True
+            ).start()
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
@@ -92,6 +108,10 @@ class VerdictEngine:
             self._safe_load_laya()
             if not self.laya_status.ready:
                 raise RuntimeError(self.laya_status.not_ready_message())
+        if self.settings.preload_agentjev:
+            self._safe_load_agentjev()
+            if not self.agentjev_status.ready:
+                raise RuntimeError(self.agentjev_status.not_ready_message())
 
     def _safe_load(self) -> None:
         with self._load_lock:
@@ -128,6 +148,24 @@ class VerdictEngine:
                 self._laya = None
             finally:
                 self.laya_status.loading = False
+
+    def _safe_load_agentjev(self) -> None:
+        with self._agentjev_lock:
+            if self.agentjev_status.ready:
+                return
+            if self.agentjev_status.loading:
+                return
+            self.agentjev_status.loading = True
+            self.agentjev_status.error = None
+            try:
+                self._load_agentjev()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("AgentJev model load failed")
+                self.agentjev_status.error = str(exc)
+                self.agentjev_status.ready = False
+                self._agentjev = None
+            finally:
+                self.agentjev_status.loading = False
 
     def _prepare_hf_cache(self) -> str:
         settings = self.settings
@@ -206,12 +244,52 @@ class VerdictEngine:
         self.laya_status.ready = True
         self.laya_status.error = None
 
+    def _load_agentjev(self) -> None:
+        from jev_api.agentjev_runtime import load_agentjev_engine
+
+        self._prepare_hf_cache()
+        engine, params, backbone = load_agentjev_engine(self.settings)
+        self._agentjev = engine
+        self.agentjev_status.parameters = params
+        self.agentjev_status.backbone = backbone
+        self.agentjev_status.device = self.settings.device
+        self.agentjev_status.backend = "agent-jev"
+        self.agentjev_status.ready = True
+        self.agentjev_status.error = None
+
     def ensure_laya(self) -> None:
         if self.laya_status.ready and self._laya is not None:
             return
         self._safe_load_laya()
         if not self.laya_status.ready or self._laya is None:
             raise RuntimeError(self.laya_status.not_ready_message())
+
+    def ensure_agentjev(self) -> None:
+        if self.agentjev_status.ready and self._agentjev is not None:
+            return
+        self._safe_load_agentjev()
+        if not self.agentjev_status.ready or self._agentjev is None:
+            raise RuntimeError(self.agentjev_status.not_ready_message())
+
+    def unload(self, name: str) -> None:
+        """Drop an engine from RAM (sequential benchmarks)."""
+        if name == "von":
+            with self._load_lock:
+                self._von = None
+                self.von_status.ready = False
+                self.von_status.loading = False
+        elif name == "laya":
+            with self._laya_lock:
+                self._laya = None
+                self.laya_status.ready = False
+                self.laya_status.loading = False
+        elif name == "agent-jev":
+            with self._agentjev_lock:
+                self._agentjev = None
+                self.agentjev_status.ready = False
+                self.agentjev_status.loading = False
+        else:
+            raise ValueError(f"Cannot unload engine {name!r}")
 
     def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
         model_name = resolve_request_model(request.model)
@@ -221,6 +299,8 @@ class VerdictEngine:
         started = time.perf_counter()
         if engine_name == "laya":
             answers, usage = self._evaluate_laya(request)
+        elif engine_name == "agent-jev":
+            answers, usage = self._evaluate_agentjev(request)
         else:
             answers, usage = self._evaluate_von(request, model_name)
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
@@ -262,6 +342,22 @@ class VerdictEngine:
             raise ValueError("Laya response is missing answers")
         answers = answers_from_mapping(raw_answers, source="Laya")
         usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        usage = Usage(
+            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+        )
+        return answers, usage
+
+    def _evaluate_agentjev(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
+        from jev_api.agentjev_runtime import evaluate_agentjev
+
+        self.ensure_agentjev()
+        if self._agentjev is None:
+            raise RuntimeError(self.agentjev_status.not_ready_message())
+
+        raw = evaluate_agentjev(self._agentjev, request.state, request.questions)
+        answers = answers_from_mapping(raw["answers"], source="AgentJev")
+        usage_raw = raw["usage"]
         usage = Usage(
             input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
             output_tokens=int(usage_raw.get("output_tokens", 0) or 0),

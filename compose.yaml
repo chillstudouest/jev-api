@@ -11,6 +11,10 @@ services:
       LAYA_HF_REPO: ${LAYA_HF_REPO:-convaiinnovations/laya}
       LAYA_SUBFOLDER: ${LAYA_SUBFOLDER:-}
       PRELOAD_LAYA: ${PRELOAD_LAYA:-false}
+      AGENTJEV_HF_REPO: ${AGENTJEV_HF_REPO:-aimeigaoshou/agent-jev}
+      AGENTJEV_BACKBONE: ${AGENTJEV_BACKBONE:-Qwen/Qwen3-0.6B}
+      PRELOAD_AGENTJEV: ${PRELOAD_AGENTJEV:-false}
+      AGENTJEV_SRC: /opt/agent-jev
       MODEL_CACHE_DIR: /data/models
       HF_HOME: /data/models
       JEV_DEVICE: cpu
