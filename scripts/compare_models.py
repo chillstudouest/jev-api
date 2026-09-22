@@ -200,6 +200,16 @@ def main() -> None:
         print(json.dumps({"model": model, "latency_ms": row["latency_ms"], "quality_rate": row["quality_rate"]}))
         if not args.keep_loaded:
             engine.unload(resolve_engine(model))
+            import gc
+
+            gc.collect()
+            try:
+                import torch
+
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
 
     report = {"models": results}
     text = json.dumps(report, indent=2)
