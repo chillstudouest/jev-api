@@ -15,6 +15,12 @@ services:
       AGENTJEV_BACKBONE: ${AGENTJEV_BACKBONE:-Qwen/Qwen3-0.6B}
       PRELOAD_AGENTJEV: ${PRELOAD_AGENTJEV:-false}
       AGENTJEV_SRC: /opt/agent-jev
+      SEMIF_HF_REPO: ${SEMIF_HF_REPO:-Qwen/Qwen3.5-4B}
+      SEMIF_REVISION: ${SEMIF_REVISION:-851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a}
+      SEMIF_BACKEND: ${SEMIF_BACKEND:-auto}
+      SEMIF_MODE: ${SEMIF_MODE:-auto}
+      PRELOAD_SEMIF: ${PRELOAD_SEMIF:-false}
+      SEMIF_SRC: /opt/semif
       MODEL_CACHE_DIR: /data/models
       HF_HOME: /data/models
       JEV_DEVICE: cpu

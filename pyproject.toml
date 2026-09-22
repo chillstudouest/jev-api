@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-api"
-version = "1.2.0"
-description = "Jev-compatible System One HTTP API with switchable Von, Laya, and AgentJev engines"
+version = "1.3.0"
+description = "Jev-compatible System One HTTP API with switchable Von, Laya, AgentJev, and SemIf engines"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -26,6 +26,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+]
+semif = [
+  "llama-cpp-python>=0.3.0",
+  "numpy>=1.26.0",
 ]
 
 [project.scripts]

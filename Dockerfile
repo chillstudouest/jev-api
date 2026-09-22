@@ -16,7 +16,8 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN git clone --depth 1 https://github.com/malevrigns/agent-jev.git /opt/agent-jev
+RUN git clone --depth 1 https://github.com/malevrigns/agent-jev.git /opt/agent-jev \
+ && git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -37,7 +38,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VON_BACKEND=von \
     PRELOAD_LAYA=false \
     PRELOAD_AGENTJEV=false \
+    PRELOAD_SEMIF=false \
     AGENTJEV_SRC=/opt/agent-jev \
+    SEMIF_SRC=/opt/semif \
     JEV_DEVICE=cpu \
     HOST=0.0.0.0 \
     PORT=8000 \
@@ -55,12 +58,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/agent-jev /opt/agent-jev
+COPY --from=builder /opt/semif /opt/semif
 
 WORKDIR /app
 COPY --chown=jev:jev src ./src
 COPY --chown=jev:jev pyproject.toml README.md ./
 
-ENV PYTHONPATH=/app/src:/opt/agent-jev
+ENV PYTHONPATH=/app/src:/opt/agent-jev:/opt/semif/src
 
 USER jev
 EXPOSE 8000

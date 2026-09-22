@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sequential von / laya / agent-jev benchmark on identical System One requests."""
+"""Sequential von / laya / agent-jev / semif benchmark on identical System One requests."""
 
 from __future__ import annotations
 
@@ -123,8 +123,12 @@ def run_model(engine: VerdictEngine, model: str, repeats: int, warmup: int) -> d
         engine.load_blocking()
     elif engine_name == "laya":
         engine.ensure_laya()
-    else:
+    elif engine_name == "agent-jev":
         engine.ensure_agentjev()
+    elif engine_name == "semif":
+        engine.ensure_semif()
+    else:
+        raise ValueError(f"Unknown engine {engine_name!r}")
 
     latencies: list[float] = []
     case_rows: list[dict[str, Any]] = []

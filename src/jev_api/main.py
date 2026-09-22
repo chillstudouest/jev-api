@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), laya, or agent-jev. "
+            "Engines: von (default), laya, agent-jev, or semif. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -126,9 +126,17 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.agentjev_status.error,
                     "runtime": "qwen3-0.6b+candidate-head",
                 },
+                "semif": {
+                    "ready": eng.semif_status.ready,
+                    "backend": eng.semif_status.backend,
+                    "backbone": eng.semif_status.backbone,
+                    "error": eng.semif_status.error,
+                    "runtime": "qwen3.5-4b-option-logits",
+                },
                 "note": (
-                    "Switch engine with body.model: von (default), laya, or agent-jev. "
-                    "laya-mlx is Apple Silicon only; this service uses official laya on CPU."
+                    "Switch engine with body.model: von (default), laya, agent-jev, or semif. "
+                    "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
+                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB)."
                 ),
             },
         )

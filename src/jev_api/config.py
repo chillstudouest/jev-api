@@ -17,10 +17,10 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    api_version: str = "1.2.0"
+    api_version: str = "1.3.0"
     model_name: str = "von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von+laya+agent-jev"
+    runtime_name: str = "pytorch+von+laya+agent-jev+semif"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -44,6 +44,25 @@ class Settings(BaseSettings):
     agentjev_backbone: str = Field(default="Qwen/Qwen3-0.6B", alias="AGENTJEV_BACKBONE")
     agentjev_src: Path | None = Field(default=None, alias="AGENTJEV_SRC")
     preload_agentjev: bool = Field(default=False, alias="PRELOAD_AGENTJEV")
+
+    semif_hf_repo: str = Field(default="Qwen/Qwen3.5-4B", alias="SEMIF_HF_REPO")
+    semif_revision: str = Field(
+        default="851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a", alias="SEMIF_REVISION"
+    )
+    semif_backend: str = Field(default="auto", alias="SEMIF_BACKEND")
+    semif_mode: str = Field(default="auto", alias="SEMIF_MODE")
+    semif_dtype: str = Field(default="bfloat16", alias="SEMIF_DTYPE")
+    semif_gguf_repo: str = Field(
+        default="bartowski/Qwen_Qwen3.5-4B-GGUF", alias="SEMIF_GGUF_REPO"
+    )
+    semif_gguf_file: str = Field(
+        default="Qwen_Qwen3.5-4B-Q4_K_M.gguf", alias="SEMIF_GGUF_FILE"
+    )
+    semif_gguf_path: Path | None = Field(default=None, alias="SEMIF_GGUF_PATH")
+    semif_src: Path | None = Field(default=None, alias="SEMIF_SRC")
+    semif_max_tokens: int = Field(default=4096, alias="SEMIF_MAX_TOKENS")
+    semif_llama_threads: int | None = Field(default=None, alias="SEMIF_LLAMA_THREADS")
+    preload_semif: bool = Field(default=False, alias="PRELOAD_SEMIF")
 
 
 @lru_cache

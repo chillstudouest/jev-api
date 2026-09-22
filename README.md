@@ -2,13 +2,14 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Three local engines, switched per request with the JSON `model` field:
+Four local engines, switched per request with the JSON `model` field:
 
 | `model` | Engine | Weights |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
 | **`agent-jev`** | [AgentJev-0.6B](https://huggingface.co/aimeigaoshou/agent-jev) | `aimeigaoshou/agent-jev` + `Qwen/Qwen3-0.6B` |
+| **`semif`** | [SemIf](https://github.com/TheoLeeCJ/SemIf) option-logit readout | `Qwen/Qwen3.5-4B` (GPU BF16) or Q4 GGUF (CPU) |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
 
@@ -17,6 +18,7 @@ Client  →  POST /v1/systemone  →  jev-api
               model=von        →  Von 395M
               model=laya       →  Laya 421M
               model=agent-jev  →  AgentJev 0.6B
+              model=semif      →  SemIf Qwen3.5-4B
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -44,16 +46,18 @@ Accepted `model` values:
 - **Von:** `von` (default), plus aliases `von-latest`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
 - **AgentJev:** `agent-jev`, plus aliases `agentjev`, `agent-jev-0.6b`
+- **SemIf:** `semif`, plus aliases `semif-latest`, `semif-phase1`, `openjev`
 
-`/ready` stays Von-based so existing deploys keep working. Laya / AgentJev download on first use (`PRELOAD_LAYA` / `PRELOAD_AGENTJEV` to load at startup).
+`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_AGENTJEV` / `PRELOAD_SEMIF` to load at startup).
 
 ## Weights
 
 - Von **`wfzyx/von-1.0`** (~1.5 GB) — loaded at startup into `MODEL_CACHE_DIR`
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
 - AgentJev **`aimeigaoshou/agent-jev`** (~1.2 GB) plus Qwen3-0.6B skeleton — lazy-loaded unless `PRELOAD_AGENTJEV=true`
+- SemIf **`Qwen/Qwen3.5-4B`** — GPU/MPS uses official SemIf torch (BF16 ~8 GB). CPU uses llama.cpp + `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (~3 GB). Lazy-loaded unless `PRELOAD_SEMIF=true`. Install `pip install -e ".[semif]"` for the CPU path.
 
-Persist `/data/models` across restarts. Do not keep all three resident on an 8 GiB VPS; switch one at a time or unload between benchmarks.
+Persist `/data/models` across restarts. Do not keep several engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
 
 ## Local
 
@@ -61,6 +65,8 @@ Persist `/data/models` across restarts. Do not keep all three resident on an 8 G
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev]"
+# optional CPU SemIf (llama.cpp):
+# pip install -e ".[semif]"
 cp .env.example .env   # set JEV_API_KEY
 python -m uvicorn jev_api.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
@@ -99,8 +105,9 @@ curl -s https://jev-api.codiku.com/v1/systemone \
     }
   }'
 
-# Laya (same payload, only model changes)
+# Laya / AgentJev / SemIf (same payload, only model changes)
 curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
+curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
 ```
 
 ## Benchmark
@@ -109,9 +116,11 @@ curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model agent-jev --n 20
+python scripts/benchmark.py --api-key "$JEV_API_KEY" --model semif --n 5
 
 # Sequential in-process compare (unloads each engine after its run)
 PYTHONPATH=src python scripts/compare_models.py --repeats 5 --out /tmp/compare.json
+PYTHONPATH=src python scripts/compare_models.py --models semif --repeats 1 --warmup 0 --out /tmp/semif.json
 ```
 
 First Laya call may download weights and take minutes; later calls are in-process.
@@ -129,13 +138,19 @@ First Laya call may download weights and take minutes; later calls are in-proces
 | `AGENTJEV_HF_REPO` | `aimeigaoshou/agent-jev` | AgentJev weights |
 | `AGENTJEV_BACKBONE` | `Qwen/Qwen3-0.6B` | Tokenizer / skeleton |
 | `PRELOAD_AGENTJEV` | `false` | Load AgentJev at startup |
+| `SEMIF_HF_REPO` | `Qwen/Qwen3.5-4B` | SemIf reference tokenizer / torch model |
+| `SEMIF_REVISION` | pinned Qwen3.5-4B commit | Required by official SemIf |
+| `SEMIF_BACKEND` | `auto` | `torch` (CUDA/MPS) or `llamacpp` (CPU GGUF) |
+| `SEMIF_MODE` | `auto` | `direct` per question, `shared` prefix reuse |
+| `SEMIF_GGUF_REPO` / `SEMIF_GGUF_FILE` | bartowski Q4_K_M | CPU weights |
+| `PRELOAD_SEMIF` | `false` | Load SemIf at startup |
 | `HF_TOKEN` | — | Optional |
 | `MODEL_CACHE_DIR` | `/data/models` | Persist volume |
 | `JEV_DEVICE` | `cpu` | |
 
 ## Resources
 
-Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. AgentJev ~**598M / ~1.2 GB**. Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
+Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. AgentJev ~**598M / ~1.2 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
 
 ## Tests
 

@@ -42,6 +42,7 @@ class EngineStatus:
             "von": ("Von OptionMarker", "~1.5GB"),
             "laya": ("Laya", "~0.8GB"),
             "agent-jev": ("AgentJev-0.6B", "~1.2GB"),
+            "semif": ("SemIf Qwen3.5-4B", "~3GB GGUF / ~8GB BF16"),
         }
         label, size = labels.get(self.name, (self.name, "weights"))
         if self.error:
@@ -77,12 +78,20 @@ class VerdictEngine:
             name="agent-jev",
             backbone=settings.agentjev_hf_repo,
         )
+        self.semif_status = EngineStatus(
+            device=settings.device,
+            backend="semif",
+            name="semif",
+            backbone=settings.semif_hf_repo,
+        )
         self._load_lock = threading.Lock()
         self._laya_lock = threading.Lock()
         self._agentjev_lock = threading.Lock()
+        self._semif_lock = threading.Lock()
         self._von: Any = None
         self._laya: Any = None
         self._agentjev: Any = None
+        self._semif: Any = None
 
     @property
     def status(self) -> EngineStatus:
@@ -98,6 +107,8 @@ class VerdictEngine:
             threading.Thread(
                 target=self._safe_load_agentjev, name="agentjev-model-load", daemon=True
             ).start()
+        if self.settings.preload_semif:
+            threading.Thread(target=self._safe_load_semif, name="semif-model-load", daemon=True).start()
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
@@ -112,6 +123,10 @@ class VerdictEngine:
             self._safe_load_agentjev()
             if not self.agentjev_status.ready:
                 raise RuntimeError(self.agentjev_status.not_ready_message())
+        if self.settings.preload_semif:
+            self._safe_load_semif()
+            if not self.semif_status.ready:
+                raise RuntimeError(self.semif_status.not_ready_message())
 
     def _safe_load(self) -> None:
         with self._load_lock:
@@ -166,6 +181,24 @@ class VerdictEngine:
                 self._agentjev = None
             finally:
                 self.agentjev_status.loading = False
+
+    def _safe_load_semif(self) -> None:
+        with self._semif_lock:
+            if self.semif_status.ready:
+                return
+            if self.semif_status.loading:
+                return
+            self.semif_status.loading = True
+            self.semif_status.error = None
+            try:
+                self._load_semif()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("SemIf model load failed")
+                self.semif_status.error = str(exc)
+                self.semif_status.ready = False
+                self._semif = None
+            finally:
+                self.semif_status.loading = False
 
     def _prepare_hf_cache(self) -> str:
         settings = self.settings
@@ -257,6 +290,19 @@ class VerdictEngine:
         self.agentjev_status.ready = True
         self.agentjev_status.error = None
 
+    def _load_semif(self) -> None:
+        from jev_api.semif_runtime import load_semif_runtime
+
+        self._prepare_hf_cache()
+        runtime, params, backbone = load_semif_runtime(self.settings)
+        self._semif = runtime
+        self.semif_status.parameters = params
+        self.semif_status.backbone = backbone
+        self.semif_status.device = self.settings.device
+        self.semif_status.backend = runtime.backend
+        self.semif_status.ready = True
+        self.semif_status.error = None
+
     def ensure_laya(self) -> None:
         if self.laya_status.ready and self._laya is not None:
             return
@@ -270,6 +316,13 @@ class VerdictEngine:
         self._safe_load_agentjev()
         if not self.agentjev_status.ready or self._agentjev is None:
             raise RuntimeError(self.agentjev_status.not_ready_message())
+
+    def ensure_semif(self) -> None:
+        if self.semif_status.ready and self._semif is not None:
+            return
+        self._safe_load_semif()
+        if not self.semif_status.ready or self._semif is None:
+            raise RuntimeError(self.semif_status.not_ready_message())
 
     def unload(self, name: str) -> None:
         """Drop an engine from RAM (sequential benchmarks)."""
@@ -288,6 +341,11 @@ class VerdictEngine:
                 self._agentjev = None
                 self.agentjev_status.ready = False
                 self.agentjev_status.loading = False
+        elif name == "semif":
+            with self._semif_lock:
+                self._semif = None
+                self.semif_status.ready = False
+                self.semif_status.loading = False
         else:
             raise ValueError(f"Cannot unload engine {name!r}")
 
@@ -301,6 +359,8 @@ class VerdictEngine:
             answers, usage = self._evaluate_laya(request)
         elif engine_name == "agent-jev":
             answers, usage = self._evaluate_agentjev(request)
+        elif engine_name == "semif":
+            answers, usage = self._evaluate_semif(request)
         else:
             answers, usage = self._evaluate_von(request, model_name)
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
@@ -357,6 +417,20 @@ class VerdictEngine:
 
         raw = evaluate_agentjev(self._agentjev, request.state, request.questions)
         answers = answers_from_mapping(raw["answers"], source="AgentJev")
+        usage_raw = raw["usage"]
+        usage = Usage(
+            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+        )
+        return answers, usage
+
+    def _evaluate_semif(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
+        self.ensure_semif()
+        if self._semif is None:
+            raise RuntimeError(self.semif_status.not_ready_message())
+
+        raw = self._semif.evaluate(request.state, request.questions)
+        answers = answers_from_mapping(raw["answers"], source="SemIf")
         usage_raw = raw["usage"]
         usage = Usage(
             input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
