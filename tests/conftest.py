@@ -55,6 +55,24 @@ class FakeEngine(VerdictEngine):
             backend="agent-jev",
             name="agent-jev",
         )
+        self.semif_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=4_000_000_000,
+            backbone="Qwen/Qwen3.5-4B",
+            device="cpu",
+            backend="llamacpp",
+            name="semif",
+        )
+        self.djev_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=None,
+            backbone="https://api.djev.dev",
+            device="remote",
+            backend="djev-http",
+            name="djev",
+        )
 
     def start_background_load(self) -> None:
         return

@@ -155,6 +155,26 @@ def test_agentjev_model_switch(client, auth_headers) -> None:
     assert body["answers"]["route"]["choice"] in {"billing", "technical"}
 
 
+def test_djev_model_switch(client, auth_headers) -> None:
+    payload = {
+        "state": "The checkout is down. Customers cannot pay.",
+        "model": "djev",
+        "questions": {
+            "team": {
+                "type": "choice",
+                "instructions": "Which team should handle this?",
+                "criteria": {
+                    "billing": "Charges and invoices",
+                    "engineering": "Outages and broken features",
+                },
+            }
+        },
+    }
+    body = _post(client, auth_headers, payload).json()
+    assert body["model"] == "djev"
+    assert body["answers"]["team"]["choice"] in {"billing", "engineering"}
+
+
 def test_semif_model_switch(client, auth_headers) -> None:
     payload = {
         "state": "Charged twice for September and cancelling Friday unless refunded.",
@@ -213,13 +233,16 @@ def test_model_info(client, auth_headers) -> None:
     assert "laya" in body["accepted_models"]
     assert "agent-jev" in body["accepted_models"]
     assert "semif" in body["accepted_models"]
+    assert "djev" in body["accepted_models"]
     assert body["extras"]["default_model"] == "von"
     assert "semif" in body["extras"]
+    assert "djev" in body["extras"]
+    assert body["extras"]["djev"]["upstream"] == "https://github.com/Davipar/djev-dev"
 
 
 @pytest.mark.parametrize(
     "model",
-    ["von", "laya", "agent-jev", "semif", "jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
+    ["von", "laya", "agent-jev", "semif", "djev", "jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
 )
 def test_accepted_model_aliases(client, auth_headers, model) -> None:
     payload = {

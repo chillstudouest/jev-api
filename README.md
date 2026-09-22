@@ -2,14 +2,15 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Four local engines, switched per request with the JSON `model` field:
+Five engines, switched per request with the JSON `model` field:
 
-| `model` | Engine | Weights |
+| `model` | Engine | Weights / backend |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
 | **`agent-jev`** | [AgentJev-0.6B](https://huggingface.co/aimeigaoshou/agent-jev) | `aimeigaoshou/agent-jev` + `Qwen/Qwen3-0.6B` |
 | **`semif`** | [SemIf](https://github.com/TheoLeeCJ/SemIf) option-logit readout | `Qwen/Qwen3.5-4B` (GPU BF16) or Q4 GGUF (CPU) |
+| **`djev`** | [djev (Maisa, diffusion-gemma)](https://github.com/Davipar/djev-dev) | Remote `POST /v1/request` → Maisa API or self-hosted djev-dev |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
 
@@ -19,6 +20,7 @@ Client  →  POST /v1/systemone  →  jev-api
               model=laya       →  Laya 421M
               model=agent-jev  →  AgentJev 0.6B
               model=semif      →  SemIf Qwen3.5-4B
+              model=djev       →  djev-dev / Maisa DiffusionGemma
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -30,6 +32,19 @@ Prod: `https://jev-api.codiku.com`
 This service uses the official `laya` package (PyTorch + Transformers, `device=cpu`). Same System One contract (`choice` / `score` / `noul`), works on the existing Coolify image.
 
 A later win for RAM/CPU/latency on the VPS is the **Rust/Candle** runtime ([`laya` crate](https://github.com/aovestdipaperino/laya-rust)), not another Python stack. That is not wired in yet so the current Von path stays untouched.
+
+## djev (Maisa, diffusion-gemma)
+
+This is the JevBench row **djev (Maisa, diffusion-gemma)** — open stack [Davipar/djev-dev](https://github.com/Davipar/djev-dev) over Google **DiffusionGemma-26B-A4B-it**.
+
+- Structured one-step read: `enable_thinking=false`, `diffusion_max_steps=1`, `read_only=true`
+- Wire: `POST /v1/request` (same noul / choice / score shapes)
+- **Not** the experimental “djev thinking” full-generation path
+
+Local djev-dev needs a large NVIDIA GPU (BF16). On an 8 GiB CPU VPS, jev-api **proxies** to:
+
+- hosted Maisa: `DJEV_BASE_URL=https://api.djev.dev` + `DJEV_API_KEY=…`
+- or your own `docker run` of djev-dev: `DJEV_BASE_URL=http://djev-model:8000`
 
 ## Endpoints
 
@@ -47,8 +62,9 @@ Accepted `model` values:
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
 - **AgentJev:** `agent-jev`, plus aliases `agentjev`, `agent-jev-0.6b`
 - **SemIf:** `semif`, plus aliases `semif-latest`, `semif-phase1`, `openjev`
+- **djev:** `djev`, plus aliases `djev-latest`, `djev-0.1`, `diffusion-gemma`, `diffusiongemma`
 
-`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_AGENTJEV` / `PRELOAD_SEMIF` to load at startup).
+`/ready` stays Von-based so existing deploys keep working. Extra engines load on first use (`PRELOAD_LAYA` / `PRELOAD_AGENTJEV` / `PRELOAD_SEMIF` / `PRELOAD_DJEV`).
 
 ## Weights
 
@@ -56,8 +72,9 @@ Accepted `model` values:
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
 - AgentJev **`aimeigaoshou/agent-jev`** (~1.2 GB) plus Qwen3-0.6B skeleton — lazy-loaded unless `PRELOAD_AGENTJEV=true`
 - SemIf **`Qwen/Qwen3.5-4B`** — GPU/MPS uses official SemIf torch (BF16 ~8 GB). CPU uses llama.cpp + `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (~3 GB). Lazy-loaded unless `PRELOAD_SEMIF=true`. Install `pip install -e ".[semif]"` for the CPU path.
+- djev — no local DiffusionGemma weights in this image. HTTP client to Maisa / self-hosted djev-dev.
 
-Persist `/data/models` across restarts. Do not keep several engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
+Persist `/data/models` across restarts. Do not keep several local engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
 
 ## Local
 
@@ -67,7 +84,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev]"
 # optional CPU SemIf (llama.cpp):
 # pip install -e ".[semif]"
-cp .env.example .env   # set JEV_API_KEY
+cp .env.example .env   # set JEV_API_KEY; for djev also DJEV_API_KEY
 python -m uvicorn jev_api.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
@@ -105,9 +122,10 @@ curl -s https://jev-api.codiku.com/v1/systemone \
     }
   }'
 
-# Laya / AgentJev / SemIf (same payload, only model changes)
+# Same payload, only model changes
 curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
 curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
+curl ... -d '{ "model": "djev", "state": "...", "questions": { ... } }'
 ```
 
 ## Benchmark
@@ -117,13 +135,14 @@ python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model agent-jev --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model semif --n 5
+python scripts/benchmark.py --api-key "$JEV_API_KEY" --model djev --n 5
 
 # Sequential in-process compare (unloads each engine after its run)
 PYTHONPATH=src python scripts/compare_models.py --repeats 5 --out /tmp/compare.json
-PYTHONPATH=src python scripts/compare_models.py --models semif --repeats 1 --warmup 0 --out /tmp/semif.json
+PYTHONPATH=src python scripts/compare_models.py --models djev --repeats 1 --warmup 0 --out /tmp/djev.json
 ```
 
-First Laya call may download weights and take minutes; later calls are in-process.
+First Laya / SemIf call may download weights and take minutes; later calls are in-process. djev needs `DJEV_API_KEY` (hosted) or a reachable self-hosted djev-dev.
 
 ## Env
 
@@ -144,13 +163,17 @@ First Laya call may download weights and take minutes; later calls are in-proces
 | `SEMIF_MODE` | `auto` | `direct` per question, `shared` prefix reuse |
 | `SEMIF_GGUF_REPO` / `SEMIF_GGUF_FILE` | bartowski Q4_K_M | CPU weights |
 | `PRELOAD_SEMIF` | `false` | Load SemIf at startup |
+| `DJEV_BASE_URL` | `https://api.djev.dev` | Maisa hosted or self-hosted djev-dev |
+| `DJEV_API_KEY` | — | Required for hosted Maisa API |
+| `DJEV_REMOTE_MODEL` | `djev` | `djev` / `djev-latest` / `djev-0.1` |
+| `PRELOAD_DJEV` | `false` | Probe djev `/ready` at startup |
 | `HF_TOKEN` | — | Optional |
 | `MODEL_CACHE_DIR` | `/data/models` | Persist volume |
 | `JEV_DEVICE` | `cpu` | |
 
 ## Resources
 
-Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. AgentJev ~**598M / ~1.2 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
+Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. AgentJev ~**598M / ~1.2 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). djev weights stay on the remote GPU / Maisa. Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
 
 ## Tests
 

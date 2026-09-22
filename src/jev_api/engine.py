@@ -43,6 +43,7 @@ class EngineStatus:
             "laya": ("Laya", "~0.8GB"),
             "agent-jev": ("AgentJev-0.6B", "~1.2GB"),
             "semif": ("SemIf Qwen3.5-4B", "~3GB GGUF / ~8GB BF16"),
+            "djev": ("djev (Maisa, diffusion-gemma)", "remote API"),
         }
         label, size = labels.get(self.name, (self.name, "weights"))
         if self.error:
@@ -84,14 +85,22 @@ class VerdictEngine:
             name="semif",
             backbone=settings.semif_hf_repo,
         )
+        self.djev_status = EngineStatus(
+            device="remote",
+            backend="djev-http",
+            name="djev",
+            backbone=settings.djev_base_url,
+        )
         self._load_lock = threading.Lock()
         self._laya_lock = threading.Lock()
         self._agentjev_lock = threading.Lock()
         self._semif_lock = threading.Lock()
+        self._djev_lock = threading.Lock()
         self._von: Any = None
         self._laya: Any = None
         self._agentjev: Any = None
         self._semif: Any = None
+        self._djev: Any = None
 
     @property
     def status(self) -> EngineStatus:
@@ -109,6 +118,8 @@ class VerdictEngine:
             ).start()
         if self.settings.preload_semif:
             threading.Thread(target=self._safe_load_semif, name="semif-model-load", daemon=True).start()
+        if self.settings.preload_djev:
+            threading.Thread(target=self._safe_load_djev, name="djev-client-load", daemon=True).start()
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
@@ -127,6 +138,10 @@ class VerdictEngine:
             self._safe_load_semif()
             if not self.semif_status.ready:
                 raise RuntimeError(self.semif_status.not_ready_message())
+        if self.settings.preload_djev:
+            self._safe_load_djev()
+            if not self.djev_status.ready:
+                raise RuntimeError(self.djev_status.not_ready_message())
 
     def _safe_load(self) -> None:
         with self._load_lock:
@@ -199,6 +214,24 @@ class VerdictEngine:
                 self._semif = None
             finally:
                 self.semif_status.loading = False
+
+    def _safe_load_djev(self) -> None:
+        with self._djev_lock:
+            if self.djev_status.ready:
+                return
+            if self.djev_status.loading:
+                return
+            self.djev_status.loading = True
+            self.djev_status.error = None
+            try:
+                self._load_djev()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("djev client load failed")
+                self.djev_status.error = str(exc)
+                self.djev_status.ready = False
+                self._djev = None
+            finally:
+                self.djev_status.loading = False
 
     def _prepare_hf_cache(self) -> str:
         settings = self.settings
@@ -303,6 +336,18 @@ class VerdictEngine:
         self.semif_status.ready = True
         self.semif_status.error = None
 
+    def _load_djev(self) -> None:
+        from jev_api.djev_runtime import load_djev_client
+
+        client, params, backbone = load_djev_client(self.settings)
+        self._djev = client
+        self.djev_status.parameters = params
+        self.djev_status.backbone = backbone
+        self.djev_status.device = "remote"
+        self.djev_status.backend = "djev-http"
+        self.djev_status.ready = True
+        self.djev_status.error = None
+
     def ensure_laya(self) -> None:
         if self.laya_status.ready and self._laya is not None:
             return
@@ -323,6 +368,13 @@ class VerdictEngine:
         self._safe_load_semif()
         if not self.semif_status.ready or self._semif is None:
             raise RuntimeError(self.semif_status.not_ready_message())
+
+    def ensure_djev(self) -> None:
+        if self.djev_status.ready and self._djev is not None:
+            return
+        self._safe_load_djev()
+        if not self.djev_status.ready or self._djev is None:
+            raise RuntimeError(self.djev_status.not_ready_message())
 
     def unload(self, name: str) -> None:
         """Drop an engine from RAM (sequential benchmarks)."""
@@ -346,6 +398,11 @@ class VerdictEngine:
                 self._semif = None
                 self.semif_status.ready = False
                 self.semif_status.loading = False
+        elif name == "djev":
+            with self._djev_lock:
+                self._djev = None
+                self.djev_status.ready = False
+                self.djev_status.loading = False
         else:
             raise ValueError(f"Cannot unload engine {name!r}")
 
@@ -361,6 +418,8 @@ class VerdictEngine:
             answers, usage = self._evaluate_agentjev(request)
         elif engine_name == "semif":
             answers, usage = self._evaluate_semif(request)
+        elif engine_name == "djev":
+            answers, usage = self._evaluate_djev(request)
         else:
             answers, usage = self._evaluate_von(request, model_name)
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
@@ -431,6 +490,20 @@ class VerdictEngine:
 
         raw = self._semif.evaluate(request.state, request.questions)
         answers = answers_from_mapping(raw["answers"], source="SemIf")
+        usage_raw = raw["usage"]
+        usage = Usage(
+            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+        )
+        return answers, usage
+
+    def _evaluate_djev(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
+        self.ensure_djev()
+        if self._djev is None:
+            raise RuntimeError(self.djev_status.not_ready_message())
+
+        raw = self._djev.evaluate(request.state, request.questions)
+        answers = answers_from_mapping(raw["answers"], source="djev")
         usage_raw = raw["usage"]
         usage = Usage(
             input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
