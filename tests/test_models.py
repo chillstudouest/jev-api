@@ -35,10 +35,6 @@ def test_semif_aliases(name: str) -> None:
     assert resolve_engine(name) == "semif"
 
 
-@pytest.mark.parametrize("name", ["djev", "djev-latest", "djev-0.1", "diffusion-gemma", "diffusiongemma"])
-def test_djev_aliases(name: str) -> None:
-    assert resolve_request_model(name) == name
-    assert resolve_engine(name) == "djev"
 
 
 def test_unknown_model() -> None:
@@ -265,56 +261,6 @@ def test_engine_dispatches_semif_without_weights(tmp_path) -> None:
     assert isinstance(NoulAnswer.model_validate(converted["urgent"]), NoulAnswer)
 
 
-def test_engine_dispatches_djev_without_remote(tmp_path) -> None:
-    from jev_api.config import Settings
-    from jev_api.engine import VerdictEngine
-    from jev_api.schemas import ChoiceAnswer, SystemOneRequest
-
-    settings = Settings(
-        jev_api_key="test",
-        download_on_startup=False,
-        model_cache_dir=tmp_path / "models",
-        djev_base_url="http://127.0.0.1:8000",
-    )
-    engine = VerdictEngine(settings)
-    engine.von_status.ready = True
-    engine.djev_status.ready = True
-
-    class StubDjev:
-        def evaluate(self, state: object, questions: dict[str, object]) -> dict[str, object]:
-            assert state == "checkout down"
-            assert "team" in questions
-            return {
-                "answers": {
-                    "team": {
-                        "type": "choice",
-                        "choice": "engineering",
-                        "probabilities": {"billing": 0.1, "engineering": 0.9},
-                        "confidence": 0.53,
-                    }
-                },
-                "usage": {"input_tokens": 240, "output_tokens": 8},
-            }
-
-    engine._djev = StubDjev()
-    response = engine.systemone(
-        SystemOneRequest(
-            state="checkout down",
-            model="djev",
-            questions={
-                "team": {
-                    "type": "choice",
-                    "instructions": "Which team?",
-                    "criteria": {"billing": "invoices", "engineering": "outages"},
-                }
-            },
-        )
-    )
-    assert response.model == "djev"
-    team = response.answers["team"]
-    assert isinstance(team, ChoiceAnswer)
-    assert team.choice == "engineering"
-    assert response.usage.input_tokens == 240
 
 
 def test_answers_from_mapping_choice_and_score() -> None:

@@ -17,10 +17,10 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    api_version: str = "1.4.0"
+    api_version: str = "1.3.0"
     model_name: str = "von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von+laya+agent-jev+semif+djev"
+    runtime_name: str = "pytorch+von+laya+agent-jev+semif"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -63,16 +63,6 @@ class Settings(BaseSettings):
     semif_max_tokens: int = Field(default=4096, alias="SEMIF_MAX_TOKENS")
     semif_llama_threads: int | None = Field(default=None, alias="SEMIF_LLAMA_THREADS")
     preload_semif: bool = Field(default=False, alias="PRELOAD_SEMIF")
-
-    # djev (Maisa, diffusion-gemma) — Davipar/djev-dev structured POST /v1/request.
-    # Self-hosted: set DJEV_BASE_URL to your djev-dev (no key by default).
-    # Hosted Maisa only: https://api.djev.dev + DJEV_API_KEY.
-    djev_base_url: str = Field(default="http://127.0.0.1:8000", alias="DJEV_BASE_URL")
-    djev_api_key: str | None = Field(default=None, alias="DJEV_API_KEY")
-    djev_remote_model: str = Field(default="djev", alias="DJEV_REMOTE_MODEL")
-    djev_timeout: float = Field(default=120.0, alias="DJEV_TIMEOUT")
-    djev_prefer_low_latency: bool = Field(default=True, alias="DJEV_PREFER_LOW_LATENCY")
-    preload_djev: bool = Field(default=False, alias="PRELOAD_DJEV")
 
 
 @lru_cache

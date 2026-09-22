@@ -1,7 +1,7 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
 Protocol-compatible with POST /v1/systemone.
-Engines: `von`, `laya`, `agent-jev`, `semif`, and `djev` (Maisa / DiffusionGemma via Davipar/djev-dev).
+Engines: `von`, `laya`, `agent-jev` (AgentJev-0.6B), and `semif` (SemIf / Qwen3.5-4B).
 """
 
 from __future__ import annotations
@@ -36,16 +36,9 @@ SEMIF_MODELS = (
     "semif-phase1",
     "openjev",
 )
-DJEV_MODELS = (
-    "djev",
-    "djev-latest",
-    "djev-0.1",
-    "diffusion-gemma",
-    "diffusiongemma",
-)
-SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + AGENTJEV_MODELS + SEMIF_MODELS + DJEV_MODELS
+SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + AGENTJEV_MODELS + SEMIF_MODELS
 DEFAULT_MODEL = "von"
-EngineName = Literal["von", "laya", "agent-jev", "semif", "djev"]
+EngineName = Literal["von", "laya", "agent-jev", "semif"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -159,8 +152,6 @@ def resolve_engine(model: str | None) -> EngineName:
         return "agent-jev"
     if resolved in SEMIF_MODELS:
         return "semif"
-    if resolved in DJEV_MODELS:
-        return "djev"
     return "von"
 
 

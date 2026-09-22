@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), laya, agent-jev, semif, or djev (Maisa/DiffusionGemma). "
+            "Engines: von (default), laya, agent-jev, or semif. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -133,21 +133,10 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.semif_status.error,
                     "runtime": "qwen3.5-4b-option-logits",
                 },
-                "djev": {
-                    "ready": eng.djev_status.ready,
-                    "backend": eng.djev_status.backend,
-                    "backbone": eng.djev_status.backbone,
-                    "error": eng.djev_status.error,
-                    "runtime": "maisa-diffusion-gemma-http",
-                    "upstream": "https://github.com/Davipar/djev-dev",
-                    "note": "JevBench: djev (Maisa, diffusion-gemma) structured one-step read — not thinking path",
-                },
                 "note": (
-                    "Switch engine with body.model: von (default), laya, agent-jev, semif, or djev. "
+                    "Switch engine with body.model: von (default), laya, agent-jev, or semif. "
                     "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
-                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB). "
-                    "djev proxies Davipar/djev-dev (Maisa DiffusionGemma). "
-                    "Self-hosted needs no API key; DJEV_API_KEY is only for api.djev.dev."
+                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB)."
                 ),
             },
         )

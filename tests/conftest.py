@@ -64,15 +64,6 @@ class FakeEngine(VerdictEngine):
             backend="llamacpp",
             name="semif",
         )
-        self.djev_status = EngineStatus(
-            ready=True,
-            loading=False,
-            parameters=None,
-            backbone="http://127.0.0.1:8000",
-            device="remote",
-            backend="djev-http",
-            name="djev",
-        )
 
     def start_background_load(self) -> None:
         return
