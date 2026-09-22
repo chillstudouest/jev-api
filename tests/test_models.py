@@ -23,10 +23,6 @@ def test_laya_aliases(name: str) -> None:
     assert resolve_engine(name) == "laya"
 
 
-@pytest.mark.parametrize("name", ["agent-jev", "agentjev", "agent-jev-0.6b"])
-def test_agentjev_aliases(name: str) -> None:
-    assert resolve_request_model(name) == name
-    assert resolve_engine(name) == "agent-jev"
 
 
 @pytest.mark.parametrize("name", ["semif", "semif-latest", "semif-phase1", "openjev"])
@@ -97,75 +93,6 @@ def test_engine_dispatches_laya_without_von_weights(tmp_path) -> None:
     assert response.usage.input_tokens == 12
 
 
-def test_engine_dispatches_agentjev_without_weights(tmp_path) -> None:
-    from jev_api.agentjev_runtime import agentjev_answers_to_systemone, questions_to_agentjev
-    from jev_api.config import Settings
-    from jev_api.engine import VerdictEngine
-    from jev_api.schemas import ChoiceAnswer, SystemOneRequest
-
-    settings = Settings(
-        jev_api_key="test",
-        download_on_startup=False,
-        model_cache_dir=tmp_path / "models",
-    )
-    engine = VerdictEngine(settings)
-    engine.von_status.ready = True
-    engine.agentjev_status.ready = True
-
-    class StubAgentJev:
-        def evaluate(self, payload: dict[str, object]) -> dict[str, object]:
-            assert isinstance(payload["questions"], list)
-            return {
-                "results": [
-                    {
-                        "id": "0",
-                        "answers": [
-                            {
-                                "id": "route",
-                                "type": "choice",
-                                "value": "billing",
-                                "margin": 0.5,
-                                "distribution": {"billing": 0.75, "technical": 0.25},
-                            }
-                        ],
-                    }
-                ],
-                "usage": {"input_path_tokens": 88, "generated_tokens": 0},
-            }
-
-    engine._agentjev = StubAgentJev()
-    response = engine.systemone(
-        SystemOneRequest(
-            state="charged twice",
-            model="agent-jev",
-            questions={
-                "route": {
-                    "type": "choice",
-                    "instructions": "Which team?",
-                    "criteria": {"billing": "refunds", "technical": "bugs"},
-                }
-            },
-        )
-    )
-    assert response.model == "agent-jev"
-    route = response.answers["route"]
-    assert isinstance(route, ChoiceAnswer)
-    assert route.choice == "billing"
-    assert response.usage.input_tokens == 88
-    mapped = questions_to_agentjev(
-        {
-            "urgent": {
-                "type": "noul",
-                "instructions": "Urgent?",
-                "criteria": {"true": "now", "false": "later"},
-            }
-        }
-    )
-    assert mapped[0]["type"] == "boolean"
-    converted = agentjev_answers_to_systemone(
-        [{"id": "urgent", "type": "boolean", "probability": 0.81, "value": True}]
-    )
-    assert converted["urgent"] == {"type": "noul", "noul": 0.81}
 
 
 def test_engine_dispatches_semif_without_weights(tmp_path) -> None:

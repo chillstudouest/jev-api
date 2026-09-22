@@ -1,7 +1,7 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
 Protocol-compatible with POST /v1/systemone.
-Engines: `von`, `laya`, `agent-jev` (AgentJev-0.6B), and `semif` (SemIf / Qwen3.5-4B).
+Engines: `von`, `laya`, and `semif` (SemIf / Qwen3.5-4B).
 """
 
 from __future__ import annotations
@@ -25,20 +25,15 @@ LAYA_MODELS = (
     "laya-latest",
     "laya-1.0",
 )
-AGENTJEV_MODELS = (
-    "agent-jev",
-    "agentjev",
-    "agent-jev-0.6b",
-)
 SEMIF_MODELS = (
     "semif",
     "semif-latest",
     "semif-phase1",
     "openjev",
 )
-SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + AGENTJEV_MODELS + SEMIF_MODELS
+SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + SEMIF_MODELS
 DEFAULT_MODEL = "von"
-EngineName = Literal["von", "laya", "agent-jev", "semif"]
+EngineName = Literal["von", "laya", "semif"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -148,8 +143,6 @@ def resolve_engine(model: str | None) -> EngineName:
     resolved = resolve_request_model(model)
     if resolved in LAYA_MODELS:
         return "laya"
-    if resolved in AGENTJEV_MODELS:
-        return "agent-jev"
     if resolved in SEMIF_MODELS:
         return "semif"
     return "von"

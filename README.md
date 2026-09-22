@@ -2,13 +2,12 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Four local engines, switched per request with the JSON `model` field:
+Three local engines, switched per request with the JSON `model` field:
 
 | `model` | Engine | Weights |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
-| **`agent-jev`** | [AgentJev-0.6B](https://huggingface.co/aimeigaoshou/agent-jev) | `aimeigaoshou/agent-jev` + `Qwen/Qwen3-0.6B` |
 | **`semif`** | [SemIf](https://github.com/TheoLeeCJ/SemIf) option-logit readout | `Qwen/Qwen3.5-4B` (GPU BF16) or Q4 GGUF (CPU) |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
@@ -17,7 +16,6 @@ Four local engines, switched per request with the JSON `model` field:
 Client  →  POST /v1/systemone  →  jev-api
               model=von        →  Von 395M
               model=laya       →  Laya 421M
-              model=agent-jev  →  AgentJev 0.6B
               model=semif      →  SemIf Qwen3.5-4B
 ```
 
@@ -45,16 +43,14 @@ Accepted `model` values:
 
 - **Von:** `von` (default), plus aliases `von-latest`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
-- **AgentJev:** `agent-jev`, plus aliases `agentjev`, `agent-jev-0.6b`
 - **SemIf:** `semif`, plus aliases `semif-latest`, `semif-phase1`, `openjev`
 
-`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_AGENTJEV` / `PRELOAD_SEMIF` to load at startup).
+`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_SEMIF` to load at startup).
 
 ## Weights
 
 - Von **`wfzyx/von-1.0`** (~1.5 GB) — loaded at startup into `MODEL_CACHE_DIR`
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
-- AgentJev **`aimeigaoshou/agent-jev`** (~1.2 GB) plus Qwen3-0.6B skeleton — lazy-loaded unless `PRELOAD_AGENTJEV=true`
 - SemIf **`Qwen/Qwen3.5-4B`** — GPU/MPS uses official SemIf torch (BF16 ~8 GB). CPU uses llama.cpp + `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (~3 GB). Lazy-loaded unless `PRELOAD_SEMIF=true`. Install `pip install -e ".[semif]"` for the CPU path.
 
 Persist `/data/models` across restarts. Do not keep several engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
@@ -105,7 +101,7 @@ curl -s https://jev-api.codiku.com/v1/systemone \
     }
   }'
 
-# Laya / AgentJev / SemIf (same payload, only model changes)
+# Laya / SemIf (same payload, only model changes)
 curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
 curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
 ```
@@ -115,7 +111,6 @@ curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
 ```bash
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
-python scripts/benchmark.py --api-key "$JEV_API_KEY" --model agent-jev --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model semif --n 5
 
 # Sequential in-process compare on 100 public JevBench decisions (not full JevBench score)
@@ -134,9 +129,6 @@ First Laya call may download weights and take minutes; later calls are in-proces
 | `LAYA_HF_REPO` | `convaiinnovations/laya` | Official Laya |
 | `LAYA_SUBFOLDER` | — | e.g. `typed-decisions` or `multilingual` |
 | `PRELOAD_LAYA` | `false` | Load Laya at startup |
-| `AGENTJEV_HF_REPO` | `aimeigaoshou/agent-jev` | AgentJev weights |
-| `AGENTJEV_BACKBONE` | `Qwen/Qwen3-0.6B` | Tokenizer / skeleton |
-| `PRELOAD_AGENTJEV` | `false` | Load AgentJev at startup |
 | `SEMIF_HF_REPO` | `Qwen/Qwen3.5-4B` | SemIf reference tokenizer / torch model |
 | `SEMIF_REVISION` | pinned Qwen3.5-4B commit | Required by official SemIf |
 | `SEMIF_BACKEND` | `auto` | `torch` (CUDA/MPS) or `llamacpp` (CPU GGUF) |
@@ -149,7 +141,7 @@ First Laya call may download weights and take minutes; later calls are in-proces
 
 ## Resources
 
-Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. AgentJev ~**598M / ~1.2 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
+Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
 
 ## Tests
 

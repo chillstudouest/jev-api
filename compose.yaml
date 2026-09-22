@@ -11,10 +11,6 @@ services:
       LAYA_HF_REPO: ${LAYA_HF_REPO:-convaiinnovations/laya}
       LAYA_SUBFOLDER: ${LAYA_SUBFOLDER:-}
       PRELOAD_LAYA: ${PRELOAD_LAYA:-false}
-      AGENTJEV_HF_REPO: ${AGENTJEV_HF_REPO:-aimeigaoshou/agent-jev}
-      AGENTJEV_BACKBONE: ${AGENTJEV_BACKBONE:-Qwen/Qwen3-0.6B}
-      PRELOAD_AGENTJEV: ${PRELOAD_AGENTJEV:-false}
-      AGENTJEV_SRC: /opt/agent-jev
       SEMIF_HF_REPO: ${SEMIF_HF_REPO:-Qwen/Qwen3.5-4B}
       SEMIF_REVISION: ${SEMIF_REVISION:-851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a}
       SEMIF_BACKEND: ${SEMIF_BACKEND:-auto}

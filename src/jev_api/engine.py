@@ -1,4 +1,4 @@
-"""Von + Laya engines behind the Jev-compatible HTTP contract."""
+"""Von + Laya + SemIf engines behind the Jev-compatible HTTP contract."""
 
 from __future__ import annotations
 
@@ -41,7 +41,6 @@ class EngineStatus:
         labels = {
             "von": ("Von OptionMarker", "~1.5GB"),
             "laya": ("Laya", "~0.8GB"),
-            "agent-jev": ("AgentJev-0.6B", "~1.2GB"),
             "semif": ("SemIf Qwen3.5-4B", "~3GB GGUF / ~8GB BF16"),
         }
         label, size = labels.get(self.name, (self.name, "weights"))
@@ -72,12 +71,6 @@ class VerdictEngine:
             name="laya",
             backbone=settings.laya_hf_repo,
         )
-        self.agentjev_status = EngineStatus(
-            device=settings.device,
-            backend="agent-jev",
-            name="agent-jev",
-            backbone=settings.agentjev_hf_repo,
-        )
         self.semif_status = EngineStatus(
             device=settings.device,
             backend="semif",
@@ -86,11 +79,9 @@ class VerdictEngine:
         )
         self._load_lock = threading.Lock()
         self._laya_lock = threading.Lock()
-        self._agentjev_lock = threading.Lock()
         self._semif_lock = threading.Lock()
         self._von: Any = None
         self._laya: Any = None
-        self._agentjev: Any = None
         self._semif: Any = None
 
     @property
@@ -103,10 +94,6 @@ class VerdictEngine:
         thread.start()
         if self.settings.preload_laya:
             threading.Thread(target=self._safe_load_laya, name="laya-model-load", daemon=True).start()
-        if self.settings.preload_agentjev:
-            threading.Thread(
-                target=self._safe_load_agentjev, name="agentjev-model-load", daemon=True
-            ).start()
         if self.settings.preload_semif:
             threading.Thread(target=self._safe_load_semif, name="semif-model-load", daemon=True).start()
 
@@ -119,10 +106,6 @@ class VerdictEngine:
             self._safe_load_laya()
             if not self.laya_status.ready:
                 raise RuntimeError(self.laya_status.not_ready_message())
-        if self.settings.preload_agentjev:
-            self._safe_load_agentjev()
-            if not self.agentjev_status.ready:
-                raise RuntimeError(self.agentjev_status.not_ready_message())
         if self.settings.preload_semif:
             self._safe_load_semif()
             if not self.semif_status.ready:
@@ -164,23 +147,6 @@ class VerdictEngine:
             finally:
                 self.laya_status.loading = False
 
-    def _safe_load_agentjev(self) -> None:
-        with self._agentjev_lock:
-            if self.agentjev_status.ready:
-                return
-            if self.agentjev_status.loading:
-                return
-            self.agentjev_status.loading = True
-            self.agentjev_status.error = None
-            try:
-                self._load_agentjev()
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("AgentJev model load failed")
-                self.agentjev_status.error = str(exc)
-                self.agentjev_status.ready = False
-                self._agentjev = None
-            finally:
-                self.agentjev_status.loading = False
 
     def _safe_load_semif(self) -> None:
         with self._semif_lock:
@@ -278,18 +244,6 @@ class VerdictEngine:
         self.laya_status.ready = True
         self.laya_status.error = None
 
-    def _load_agentjev(self) -> None:
-        from jev_api.agentjev_runtime import load_agentjev_engine
-
-        self._prepare_hf_cache()
-        engine, params, backbone = load_agentjev_engine(self.settings)
-        self._agentjev = engine
-        self.agentjev_status.parameters = params
-        self.agentjev_status.backbone = backbone
-        self.agentjev_status.device = self.settings.device
-        self.agentjev_status.backend = "agent-jev"
-        self.agentjev_status.ready = True
-        self.agentjev_status.error = None
 
     def _load_semif(self) -> None:
         from jev_api.semif_runtime import load_semif_runtime
@@ -312,12 +266,6 @@ class VerdictEngine:
         if not self.laya_status.ready or self._laya is None:
             raise RuntimeError(self.laya_status.not_ready_message())
 
-    def ensure_agentjev(self) -> None:
-        if self.agentjev_status.ready and self._agentjev is not None:
-            return
-        self._safe_load_agentjev()
-        if not self.agentjev_status.ready or self._agentjev is None:
-            raise RuntimeError(self.agentjev_status.not_ready_message())
 
     def ensure_semif(self) -> None:
         if self.semif_status.ready and self._semif is not None:
@@ -339,11 +287,6 @@ class VerdictEngine:
                 self._laya = None
                 self.laya_status.ready = False
                 self.laya_status.loading = False
-        elif name == "agent-jev":
-            with self._agentjev_lock:
-                self._agentjev = None
-                self.agentjev_status.ready = False
-                self.agentjev_status.loading = False
         elif name == "semif":
             with self._semif_lock:
                 self._semif = None
@@ -360,8 +303,6 @@ class VerdictEngine:
         started = time.perf_counter()
         if engine_name == "laya":
             answers, usage = self._evaluate_laya(request)
-        elif engine_name == "agent-jev":
-            answers, usage = self._evaluate_agentjev(request)
         elif engine_name == "semif":
             answers, usage = self._evaluate_semif(request)
         else:
@@ -411,21 +352,6 @@ class VerdictEngine:
         )
         return answers, usage
 
-    def _evaluate_agentjev(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
-        from jev_api.agentjev_runtime import evaluate_agentjev
-
-        self.ensure_agentjev()
-        if self._agentjev is None:
-            raise RuntimeError(self.agentjev_status.not_ready_message())
-
-        raw = evaluate_agentjev(self._agentjev, request.state, request.questions)
-        answers = answers_from_mapping(raw["answers"], source="AgentJev")
-        usage_raw = raw["usage"]
-        usage = Usage(
-            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
-            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
-        )
-        return answers, usage
 
     def _evaluate_semif(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
         self.ensure_semif()

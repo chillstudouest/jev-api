@@ -79,7 +79,7 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=120.0)
-    parser.add_argument("--model", default="von", help="von, laya, agent-jev, or semif")
+    parser.add_argument("--model", default="von", help="von, laya, or semif")
     args = parser.parse_args()
 
     with urllib.request.urlopen(f"{args.base_url.rstrip('/')}/ready", timeout=args.timeout) as resp:

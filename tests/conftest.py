@@ -46,15 +46,6 @@ class FakeEngine(VerdictEngine):
             backend="laya",
             name="laya",
         )
-        self.agentjev_status = EngineStatus(
-            ready=True,
-            loading=False,
-            parameters=598_000_000,
-            backbone="aimeigaoshou/agent-jev",
-            device="cpu",
-            backend="agent-jev",
-            name="agent-jev",
-        )
         self.semif_status = EngineStatus(
             ready=True,
             loading=False,
