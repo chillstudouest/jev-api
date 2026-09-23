@@ -140,6 +140,8 @@ def run_model(
         engine.ensure_laya()
     elif engine_name == "semif":
         engine.ensure_semif()
+    elif engine_name == "jev":
+        engine.ensure_jev()
     else:
         raise ValueError(f"Unknown engine {engine_name!r}")
 
@@ -212,7 +214,7 @@ def run_model(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models", default="von,laya,semif")
+    parser.add_argument("--models", default="von,laya,semif,jev")
     parser.add_argument("--limit", type=int, default=100, help="Number of JevBench public decisions")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=1)

@@ -42,6 +42,7 @@ class EngineStatus:
             "von": ("Von OptionMarker", "~1.5GB"),
             "laya": ("Laya", "~0.8GB"),
             "semif": ("SemIf Qwen3.5-4B", "~3GB GGUF / ~8GB BF16"),
+            "jev": ("TypeSafe Jev (official)", "remote API"),
         }
         label, size = labels.get(self.name, (self.name, "weights"))
         if self.error:
@@ -77,12 +78,20 @@ class VerdictEngine:
             name="semif",
             backbone=settings.semif_hf_repo,
         )
+        self.jev_status = EngineStatus(
+            device="remote",
+            backend="typesafe-http",
+            name="jev",
+            backbone=settings.typesafe_base_url,
+        )
         self._load_lock = threading.Lock()
         self._laya_lock = threading.Lock()
         self._semif_lock = threading.Lock()
+        self._jev_lock = threading.Lock()
         self._von: Any = None
         self._laya: Any = None
         self._semif: Any = None
+        self._jev: Any = None
 
     @property
     def status(self) -> EngineStatus:
@@ -96,6 +105,8 @@ class VerdictEngine:
             threading.Thread(target=self._safe_load_laya, name="laya-model-load", daemon=True).start()
         if self.settings.preload_semif:
             threading.Thread(target=self._safe_load_semif, name="semif-model-load", daemon=True).start()
+        if self.settings.preload_jev:
+            threading.Thread(target=self._safe_load_jev, name="jev-client-load", daemon=True).start()
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
@@ -110,6 +121,10 @@ class VerdictEngine:
             self._safe_load_semif()
             if not self.semif_status.ready:
                 raise RuntimeError(self.semif_status.not_ready_message())
+        if self.settings.preload_jev:
+            self._safe_load_jev()
+            if not self.jev_status.ready:
+                raise RuntimeError(self.jev_status.not_ready_message())
 
     def _safe_load(self) -> None:
         with self._load_lock:
@@ -166,6 +181,25 @@ class VerdictEngine:
             finally:
                 self.semif_status.loading = False
 
+
+
+    def _safe_load_jev(self) -> None:
+        with self._jev_lock:
+            if self.jev_status.ready:
+                return
+            if self.jev_status.loading:
+                return
+            self.jev_status.loading = True
+            self.jev_status.error = None
+            try:
+                self._load_jev()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("TypeSafe Jev client load failed")
+                self.jev_status.error = str(exc)
+                self.jev_status.ready = False
+                self._jev = None
+            finally:
+                self.jev_status.loading = False
 
     def _prepare_hf_cache(self) -> str:
         settings = self.settings
@@ -258,6 +292,19 @@ class VerdictEngine:
         self.semif_status.ready = True
         self.semif_status.error = None
 
+    def _load_jev(self) -> None:
+        from jev_api.typesafe_runtime import load_typesafe_client
+
+        client, params, backbone = load_typesafe_client(self.settings)
+        self._jev = client
+        self.jev_status.parameters = params
+        self.jev_status.backbone = backbone
+        self.jev_status.device = "remote"
+        self.jev_status.backend = "typesafe-http"
+        self.jev_status.ready = True
+        self.jev_status.error = None
+
+
 
     def ensure_laya(self) -> None:
         if self.laya_status.ready and self._laya is not None:
@@ -273,6 +320,14 @@ class VerdictEngine:
         self._safe_load_semif()
         if not self.semif_status.ready or self._semif is None:
             raise RuntimeError(self.semif_status.not_ready_message())
+
+    def ensure_jev(self) -> None:
+        if self.jev_status.ready and self._jev is not None:
+            return
+        self._safe_load_jev()
+        if not self.jev_status.ready or self._jev is None:
+            raise RuntimeError(self.jev_status.not_ready_message())
+
 
 
     def unload(self, name: str) -> None:
@@ -292,6 +347,11 @@ class VerdictEngine:
                 self._semif = None
                 self.semif_status.ready = False
                 self.semif_status.loading = False
+        elif name == "jev":
+            with self._jev_lock:
+                self._jev = None
+                self.jev_status.ready = False
+                self.jev_status.loading = False
         else:
             raise ValueError(f"Cannot unload engine {name!r}")
 
@@ -305,6 +365,8 @@ class VerdictEngine:
             answers, usage = self._evaluate_laya(request)
         elif engine_name == "semif":
             answers, usage = self._evaluate_semif(request)
+        elif engine_name == "jev":
+            answers, usage = self._evaluate_jev(request)
         else:
             answers, usage = self._evaluate_von(request, model_name)
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
@@ -366,6 +428,25 @@ class VerdictEngine:
             output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
         )
         return answers, usage
+
+    def _evaluate_jev(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
+        self.ensure_jev()
+        if self._jev is None:
+            raise RuntimeError(self.jev_status.not_ready_message())
+
+        raw = self._jev.evaluate(
+            request.state,
+            request.questions,
+            request_model=resolve_request_model(request.model),
+        )
+        answers = answers_from_mapping(raw["answers"], source="TypeSafe Jev")
+        usage_raw = raw["usage"]
+        usage = Usage(
+            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+        )
+        return answers, usage
+
 
 
 
