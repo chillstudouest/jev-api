@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-api"
-version = "1.1.0"
-description = "Jev-compatible System One HTTP API powered by Von OptionMarker 395M"
+version = "1.4.0"
+description = "Jev-compatible System One HTTP API with Von, Laya, SemIf, and official TypeSafe Jev"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,12 +18,17 @@ dependencies = [
   "accelerate>=0.26.0",
   "huggingface_hub>=0.26.0",
   "von-sdk @ git+https://github.com/wfzyx/von.git",
+  "laya>=0.3.5",
   "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+]
+semif = [
+  "llama-cpp-python>=0.3.0",
+  "numpy>=1.26.0",
 ]
 
 [project.scripts]

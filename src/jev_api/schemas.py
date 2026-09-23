@@ -1,7 +1,7 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
 Protocol-compatible with POST /v1/systemone.
-Engine: Von OptionMarker 395M (wfzyx/von-1.0) — not TypeSafe Jev weights.
+Engines: `von`, `laya`, `semif`, and `jev` (official TypeSafe API).
 """
 
 from __future__ import annotations
@@ -10,16 +10,37 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SUPPORTED_MODELS = (
-    "jev-latest",
-    "jev-preview",
-    "jev-1.13.0",
+VON_MODELS = (
+    "von",
     "von-latest",
     "von-preview",
     "von-1.0.0",
     "von-option-marker",
+    "jev-latest",
+    "jev-preview",
+    "jev-1.13.0",
 )
-DEFAULT_MODEL = "jev-1.13.0"
+LAYA_MODELS = (
+    "laya",
+    "laya-latest",
+    "laya-1.0",
+)
+SEMIF_MODELS = (
+    "semif",
+    "semif-latest",
+    "semif-phase1",
+    "openjev",
+)
+# Official TypeSafe hosted Jev (not local Von). jev-* aliases above stay Von for BC.
+JEV_OFFICIAL_MODELS = (
+    "jev",
+    "typesafe",
+    "typesafe-jev",
+    "jev-official",
+)
+SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + SEMIF_MODELS + JEV_OFFICIAL_MODELS
+DEFAULT_MODEL = "von"
+EngineName = Literal["von", "laya", "semif", "jev"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -123,6 +144,17 @@ def resolve_request_model(model: str | None) -> str:
     if resolved not in SUPPORTED_MODELS:
         raise ApiUsageError(f"Unknown model: {resolved}")
     return resolved
+
+
+def resolve_engine(model: str | None) -> EngineName:
+    resolved = resolve_request_model(model)
+    if resolved in LAYA_MODELS:
+        return "laya"
+    if resolved in SEMIF_MODELS:
+        return "semif"
+    if resolved in JEV_OFFICIAL_MODELS:
+        return "jev"
+    return "von"
 
 
 class ChoiceAnswer(BaseModel):

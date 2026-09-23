@@ -28,13 +28,41 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "jev"
 class FakeEngine(VerdictEngine):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
-        self.status = EngineStatus(
+        self.von_status = EngineStatus(
             ready=True,
             loading=False,
             parameters=395_000_000,
             backbone="wfzyx/von-1.0",
             device="cpu",
-            backend="option-marker",
+            backend="von",
+            name="von",
+        )
+        self.laya_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=421_000_000,
+            backbone="convaiinnovations/laya",
+            device="cpu",
+            backend="laya",
+            name="laya",
+        )
+        self.semif_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=4_000_000_000,
+            backbone="Qwen/Qwen3.5-4B",
+            device="cpu",
+            backend="llamacpp",
+            name="semif",
+        )
+        self.jev_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=None,
+            backbone="https://api.typesafe.ai",
+            device="remote",
+            backend="typesafe-http",
+            name="jev",
         )
 
     def start_background_load(self) -> None:

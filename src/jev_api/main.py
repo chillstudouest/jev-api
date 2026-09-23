@@ -1,4 +1,4 @@
-"""jev-api — Jev-compatible System One HTTP server powered by Von 395M."""
+"""jev-api — Jev-compatible System One HTTP server (Von + Laya)."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from jev_api.schemas import (
     ReadyResponse,
     SystemOneRequest,
     SystemOneResponse,
+    resolve_engine,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,7 +54,8 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engine: Von OptionMarker 395M (wfzyx/von-1.0)."
+            "Engines: von (default), laya, semif, or jev (official TypeSafe API). "
+            "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
     )
@@ -102,15 +104,55 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
             checkpoint_repo=cfg.hf_repo,
             ready=eng.status.ready,
             extras={
-                "von_backend": eng.status.backend,
-                "note": "Protocol-compatible with Jev; predictions come from Von 395M OptionMarker",
+                "default_model": "von",
+                "von_backend": eng.von_status.backend,
+                "von": {
+                    "ready": eng.von_status.ready,
+                    "backend": eng.von_status.backend,
+                    "backbone": eng.von_status.backbone,
+                    "error": eng.von_status.error,
+                },
+                "laya": {
+                    "ready": eng.laya_status.ready,
+                    "backend": eng.laya_status.backend,
+                    "backbone": eng.laya_status.backbone,
+                    "error": eng.laya_status.error,
+                    "runtime": "python+transformers",
+                },
+                "semif": {
+                    "ready": eng.semif_status.ready,
+                    "backend": eng.semif_status.backend,
+                    "backbone": eng.semif_status.backbone,
+                    "error": eng.semif_status.error,
+                    "runtime": "qwen3.5-4b-option-logits",
+                },
+                "jev": {
+                    "ready": eng.jev_status.ready,
+                    "backend": eng.jev_status.backend,
+                    "backbone": eng.jev_status.backbone,
+                    "error": eng.jev_status.error,
+                    "runtime": "typesafe-official-http",
+                    "upstream": "https://api.typesafe.ai/v1/systemone",
+                },
+                "note": (
+                    "Switch engine with body.model: von (default), laya, semif, or jev. "
+                    "model=jev proxies the official TypeSafe API (TYPESAFE_API_KEY). "
+                    "jev-latest / jev-preview / jev-1.13.0 remain local Von aliases. "
+                    "laya-mlx is Apple Silicon only; SemIf CPU uses llama.cpp GGUF."
+                ),
             },
         )
 
     def _systemone(payload: SystemOneRequest, request: Request) -> SystemOneResponse:
         eng: VerdictEngine = request.app.state.engine
-        if not eng.status.ready:
-            raise_usage(503, eng.status.not_ready_message(), error_type="server_error")
+        try:
+            engine_name = resolve_engine(payload.model)
+        except ApiUsageError as exc:
+            raise_usage(400, exc.message, exc.error_type)
+            raise
+        if engine_name == "von" and not eng.von_status.ready:
+            raise_usage(503, eng.von_status.not_ready_message(), error_type="server_error")
+        # Official Jev is remote; ready check happens on first ensure_jev (lazy).
         try:
             return eng.systemone(payload)
         except ApiUsageError as exc:

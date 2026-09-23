@@ -15,7 +15,7 @@ from typing import Any
 
 PAYLOAD = {
     "state": "Charged twice for September and cancelling Friday unless refunded.",
-    "model": "jev-1.13.0",
+    "model": "von",
     "questions": {
         "route": {
             "type": "choice",
@@ -39,8 +39,11 @@ PAYLOAD = {
 }
 
 
-def request_once(base_url: str, api_key: str, timeout: float) -> tuple[float, dict[str, Any]]:
-    body = json.dumps(PAYLOAD).encode("utf-8")
+def request_once(
+    base_url: str, api_key: str, timeout: float, model: str
+) -> tuple[float, dict[str, Any]]:
+    payload = {**PAYLOAD, "model": model}
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/v1/systemone",
         data=body,
@@ -76,13 +79,14 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--model", default="von", help="von, laya, semif, or jev")
     args = parser.parse_args()
 
     with urllib.request.urlopen(f"{args.base_url.rstrip('/')}/ready", timeout=args.timeout) as resp:
         print("ready", json.loads(resp.read().decode()))
 
     for _ in range(args.warmup):
-        request_once(args.base_url, args.api_key, args.timeout)
+        request_once(args.base_url, args.api_key, args.timeout, args.model)
 
     latencies: list[float] = []
     errors = 0
@@ -91,7 +95,7 @@ def main() -> None:
     def work(_: int) -> None:
         nonlocal errors
         try:
-            ms, _ = request_once(args.base_url, args.api_key, args.timeout)
+            ms, _ = request_once(args.base_url, args.api_key, args.timeout, args.model)
             latencies.append(ms)
         except Exception as exc:  # noqa: BLE001
             errors += 1
@@ -111,6 +115,7 @@ def main() -> None:
     print(
         json.dumps(
             {
+                "model": args.model,
                 "n": args.n,
                 "errors": errors,
                 "concurrency": args.concurrency,
