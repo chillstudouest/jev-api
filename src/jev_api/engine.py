@@ -1,4 +1,4 @@
-"""Von + Laya + SemIf engines behind the Jev-compatible HTTP contract."""
+"""Von + Laya + SemIf + AutoJev engines behind the Jev-compatible HTTP contract."""
 
 from __future__ import annotations
 
@@ -42,6 +42,7 @@ class EngineStatus:
             "von": ("Von OptionMarker", "~1.5GB"),
             "laya": ("Laya", "~0.8GB"),
             "semif": ("SemIf Qwen3.5-4B", "~3GB GGUF / ~8GB BF16"),
+            "autojev": ("AutoJev-27B", "remote autojev-serve, ~49 GiB BF16"),
         }
         label, size = labels.get(self.name, (self.name, "weights"))
         if self.error:
@@ -77,9 +78,17 @@ class VerdictEngine:
             name="semif",
             backbone=settings.semif_hf_repo,
         )
+        self.autojev_status = EngineStatus(
+            device="http",
+            backend="http",
+            name="autojev",
+            backbone=settings.autojev_hf_repo,
+            parameters=27_000_000_000,
+        )
         self._load_lock = threading.Lock()
         self._laya_lock = threading.Lock()
         self._semif_lock = threading.Lock()
+        self._autojev_lock = threading.Lock()
         self._von: Any = None
         self._laya: Any = None
         self._semif: Any = None
@@ -274,6 +283,20 @@ class VerdictEngine:
         if not self.semif_status.ready or self._semif is None:
             raise RuntimeError(self.semif_status.not_ready_message())
 
+    def ensure_autojev(self) -> None:
+        from jev_api.autojev_runtime import NOT_CONFIGURED_MESSAGE, autojev_configured
+
+        with self._autojev_lock:
+            if autojev_configured(self.settings):
+                self.autojev_status.ready = True
+                self.autojev_status.error = None
+                self.autojev_status.backbone = self.settings.autojev_hf_repo
+                self.autojev_status.backend = "http"
+                self.autojev_status.device = "http"
+                return
+            self.autojev_status.ready = False
+            self.autojev_status.error = NOT_CONFIGURED_MESSAGE
+            raise RuntimeError(NOT_CONFIGURED_MESSAGE)
 
     def unload(self, name: str) -> None:
         """Drop an engine from RAM (sequential benchmarks)."""
@@ -292,6 +315,10 @@ class VerdictEngine:
                 self._semif = None
                 self.semif_status.ready = False
                 self.semif_status.loading = False
+        elif name == "autojev":
+            with self._autojev_lock:
+                self.autojev_status.ready = False
+                self.autojev_status.loading = False
         else:
             raise ValueError(f"Cannot unload engine {name!r}")
 
@@ -305,6 +332,8 @@ class VerdictEngine:
             answers, usage = self._evaluate_laya(request)
         elif engine_name == "semif":
             answers, usage = self._evaluate_semif(request)
+        elif engine_name == "autojev":
+            answers, usage = self._evaluate_autojev(request)
         else:
             answers, usage = self._evaluate_von(request, model_name)
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
@@ -367,7 +396,19 @@ class VerdictEngine:
         )
         return answers, usage
 
+    def _evaluate_autojev(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage]:
+        from jev_api.autojev_runtime import evaluate_autojev
 
+        self.ensure_autojev()
+        raw = evaluate_autojev(self.settings, request)
+        raw_answers = raw.get("answers")
+        answers = answers_from_mapping(raw_answers, source="AutoJev")
+        usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        usage = Usage(
+            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+        )
+        return answers, usage
 
 
 def answers_from_mapping(raw_answers: object, source: str) -> dict[str, Answer]:

@@ -157,6 +157,23 @@ def test_semif_model_switch(client, auth_headers) -> None:
     assert body["answers"]["route"]["choice"] in {"billing", "technical"}
 
 
+def test_autojev_model_switch(client, auth_headers) -> None:
+    payload = {
+        "state": "Charged twice for September and cancelling Friday unless refunded.",
+        "model": "autojev",
+        "questions": {
+            "route": {
+                "type": "choice",
+                "instructions": "Which team should handle this?",
+                "criteria": {"billing": "Payments and refunds", "technical": "Bugs and outages"},
+            }
+        },
+    }
+    body = _post(client, auth_headers, payload).json()
+    assert body["model"] == "autojev"
+    assert body["answers"]["route"]["choice"] in {"billing", "technical"}
+
+
 def test_laya_model_switch(client, auth_headers) -> None:
     payload = {
         "state": "Charged twice for September and cancelling Friday unless refunded.",
@@ -197,13 +214,16 @@ def test_model_info(client, auth_headers) -> None:
     assert "von" in body["accepted_models"]
     assert "laya" in body["accepted_models"]
     assert "semif" in body["accepted_models"]
+    assert "autojev" in body["accepted_models"]
     assert body["extras"]["default_model"] == "von"
     assert "semif" in body["extras"]
+    assert "autojev" in body["extras"]
+    assert body["extras"]["autojev"]["configured"] is False
 
 
 @pytest.mark.parametrize(
     "model",
-    ["von", "laya", "semif", "jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
+    ["von", "laya", "semif", "autojev", "autojev-27b", "jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
 )
 def test_accepted_model_aliases(client, auth_headers, model) -> None:
     payload = {

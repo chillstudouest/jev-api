@@ -31,6 +31,10 @@ def test_semif_aliases(name: str) -> None:
     assert resolve_engine(name) == "semif"
 
 
+@pytest.mark.parametrize("name", ["autojev", "autojev-27b", "autojev-latest"])
+def test_autojev_aliases(name: str) -> None:
+    assert resolve_request_model(name) == name
+    assert resolve_engine(name) == "autojev"
 
 
 def test_unknown_model() -> None:
@@ -186,6 +190,79 @@ def test_engine_dispatches_semif_without_weights(tmp_path) -> None:
     assert converted["severity"]["score"] == 0.75
     assert isinstance(ScoreAnswer.model_validate(converted["severity"]), ScoreAnswer)
     assert isinstance(NoulAnswer.model_validate(converted["urgent"]), NoulAnswer)
+
+
+def test_engine_dispatches_autojev_without_weights(tmp_path, monkeypatch) -> None:
+    from jev_api.config import Settings
+    from jev_api.engine import VerdictEngine
+    from jev_api.schemas import ChoiceAnswer, SystemOneRequest
+
+    settings = Settings(
+        jev_api_key="test",
+        download_on_startup=False,
+        model_cache_dir=tmp_path / "models",
+        autojev_base_url="http://autojev.test",
+    )
+    engine = VerdictEngine(settings)
+
+    def fake_evaluate(cfg: Settings, request: SystemOneRequest) -> dict[str, object]:
+        assert cfg.autojev_base_url == "http://autojev.test"
+        assert request.state == "charged twice"
+        return {
+            "answers": {
+                "route": {
+                    "type": "choice",
+                    "choice": "billing",
+                    "probabilities": {"billing": 0.9, "technical": 0.1},
+                    "confidence": 0.8,
+                }
+            },
+            "usage": {"input_tokens": 88, "output_tokens": 0},
+        }
+
+    monkeypatch.setattr("jev_api.autojev_runtime.evaluate_autojev", fake_evaluate)
+    response = engine.systemone(
+        SystemOneRequest(
+            state="charged twice",
+            model="autojev",
+            questions={
+                "route": {
+                    "type": "choice",
+                    "instructions": "Which team?",
+                    "criteria": {"billing": "refunds", "technical": "bugs"},
+                }
+            },
+        )
+    )
+    assert response.model == "autojev"
+    route = response.answers["route"]
+    assert isinstance(route, ChoiceAnswer)
+    assert route.choice == "billing"
+    assert response.usage.input_tokens == 88
+
+
+def test_autojev_unconfigured_raises(tmp_path) -> None:
+    from jev_api.autojev_runtime import NOT_CONFIGURED_MESSAGE
+    from jev_api.config import Settings
+    from jev_api.engine import VerdictEngine
+    from jev_api.schemas import SystemOneRequest
+
+    settings = Settings(
+        jev_api_key="test",
+        download_on_startup=False,
+        model_cache_dir=tmp_path / "models",
+        autojev_base_url="",
+    )
+    engine = VerdictEngine(settings)
+    with pytest.raises(RuntimeError, match="AUTOJEV_BASE_URL"):
+        engine.systemone(
+            SystemOneRequest(
+                state="charged twice",
+                model="autojev-27b",
+                questions={"urgent": {"type": "noul", "instructions": "Urgent?"}},
+            )
+        )
+    assert NOT_CONFIGURED_MESSAGE in (engine.autojev_status.error or "")
 
 
 

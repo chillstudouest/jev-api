@@ -1,4 +1,4 @@
-"""jev-api — Jev-compatible System One HTTP server (Von + Laya)."""
+"""jev-api — Jev-compatible System One HTTP server (Von + Laya + SemIf + AutoJev)."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), laya, or semif. "
+            "Engines: von (default), laya, semif, or autojev (remote). "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -126,10 +126,20 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.semif_status.error,
                     "runtime": "qwen3.5-4b-option-logits",
                 },
+                "autojev": {
+                    "ready": eng.autojev_status.ready,
+                    "backend": "http",
+                    "backbone": cfg.autojev_hf_repo,
+                    "configured": bool(cfg.autojev_base_url.strip()),
+                    "error": eng.autojev_status.error,
+                    "runtime": "remote-autojev-serve",
+                    "vram": "~49 GiB BF16 + overhead; does not fit Modal T4",
+                },
                 "note": (
-                    "Switch engine with body.model: von (default), laya, or semif. "
+                    "Switch engine with body.model: von (default), laya, semif, or autojev. "
                     "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
-                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB)."
+                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB). "
+                    "autojev is HTTP-only: set AUTOJEV_BASE_URL; 27B BF16 will not load on T4."
                 ),
             },
         )

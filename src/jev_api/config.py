@@ -17,10 +17,10 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    api_version: str = "1.3.0"
+    api_version: str = "1.4.0"
     model_name: str = "von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von+laya+semif"
+    runtime_name: str = "pytorch+von+laya+semif+autojev"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     semif_max_tokens: int = Field(default=4096, alias="SEMIF_MAX_TOKENS")
     semif_llama_threads: int | None = Field(default=None, alias="SEMIF_LLAMA_THREADS")
     preload_semif: bool = Field(default=False, alias="PRELOAD_SEMIF")
+
+    autojev_base_url: str = Field(default="", alias="AUTOJEV_BASE_URL")
+    autojev_api_key: str = Field(default="", alias="AUTOJEV_API_KEY")
+    autojev_timeout: float = Field(default=120.0, alias="AUTOJEV_TIMEOUT")
+    autojev_hf_repo: str = Field(default="denis-pplx/autojev-27b", alias="AUTOJEV_HF_REPO")
+    autojev_upstream_model: str = Field(default="autojev", alias="AUTOJEV_UPSTREAM_MODEL")
 
 
 @lru_cache

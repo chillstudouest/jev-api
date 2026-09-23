@@ -55,6 +55,15 @@ class FakeEngine(VerdictEngine):
             backend="llamacpp",
             name="semif",
         )
+        self.autojev_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=27_000_000_000,
+            backbone="denis-pplx/autojev-27b",
+            device="http",
+            backend="http",
+            name="autojev",
+        )
 
     def start_background_load(self) -> None:
         return
