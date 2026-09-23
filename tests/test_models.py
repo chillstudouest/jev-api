@@ -31,6 +31,16 @@ def test_semif_aliases(name: str) -> None:
     assert resolve_engine(name) == "semif"
 
 
+@pytest.mark.parametrize("name", ["jev", "typesafe", "typesafe-jev", "jev-official"])
+def test_jev_official_aliases(name: str) -> None:
+    assert resolve_request_model(name) == name
+    assert resolve_engine(name) == "jev"
+
+
+def test_jev_latest_still_von() -> None:
+    assert resolve_engine("jev-latest") == "von"
+
+
 
 
 def test_unknown_model() -> None:
@@ -188,6 +198,46 @@ def test_engine_dispatches_semif_without_weights(tmp_path) -> None:
     assert isinstance(NoulAnswer.model_validate(converted["urgent"]), NoulAnswer)
 
 
+
+
+def test_engine_dispatches_jev_without_remote(tmp_path) -> None:
+    from jev_api.config import Settings
+    from jev_api.engine import VerdictEngine
+    from jev_api.schemas import NoulAnswer, SystemOneRequest
+
+    settings = Settings(
+        jev_api_key="test",
+        download_on_startup=False,
+        model_cache_dir=tmp_path / "models",
+        typesafe_api_key="typesafe-test-key",
+    )
+    engine = VerdictEngine(settings)
+    engine.von_status.ready = True
+    engine.jev_status.ready = True
+
+    class StubTypesafe:
+        def evaluate(self, state: object, questions: dict[str, object], *, request_model: str | None = None) -> dict[str, object]:
+            assert state == "charged twice"
+            assert request_model == "jev"
+            return {
+                "answers": {"urgent": {"type": "noul", "noul": 0.91}},
+                "usage": {"input_tokens": 120, "output_tokens": 12},
+                "upstream_model": "jev-1.13.0",
+            }
+
+    engine._jev = StubTypesafe()
+    response = engine.systemone(
+        SystemOneRequest(
+            state="charged twice",
+            model="jev",
+            questions={"urgent": {"type": "noul", "instructions": "Urgent?"}},
+        )
+    )
+    assert response.model == "jev"
+    urgent = response.answers["urgent"]
+    assert isinstance(urgent, NoulAnswer)
+    assert urgent.noul == 0.91
+    assert response.usage.input_tokens == 120
 
 
 def test_answers_from_mapping_choice_and_score() -> None:

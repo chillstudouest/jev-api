@@ -2,21 +2,23 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Three local engines, switched per request with the JSON `model` field:
+Local engines plus an optional proxy to the official TypeSafe API, switched per request with the JSON `model` field:
 
-| `model` | Engine | Weights |
+| `model` | Engine | Weights / upstream |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
 | **`semif`** | [SemIf](https://github.com/TheoLeeCJ/SemIf) option-logit readout | `Qwen/Qwen3.5-4B` (GPU BF16) or Q4 GGUF (CPU) |
+| **`jev`** | Official TypeSafe Jev | `https://api.typesafe.ai/v1/systemone` (`TYPESAFE_API_KEY`) |
 
-> Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
+> Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev. `model=jev` is the hosted API; `jev-latest` / `jev-preview` stay local Von aliases.
 
 ```text
 Client  →  POST /v1/systemone  →  jev-api
               model=von        →  Von 395M
               model=laya       →  Laya 421M
               model=semif      →  SemIf Qwen3.5-4B
+              model=jev        →  TypeSafe official API
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -44,8 +46,9 @@ Accepted `model` values:
 - **Von:** `von` (default), plus aliases `von-latest`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
 - **SemIf:** `semif`, plus aliases `semif-latest`, `semif-phase1`, `openjev`
+- **Official TypeSafe:** `jev`, plus aliases `typesafe`, `typesafe-jev`, `jev-official` (requires `TYPESAFE_API_KEY`)
 
-`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_SEMIF` to load at startup).
+`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_SEMIF` / `PRELOAD_JEV` to load at startup).
 
 ## Weights
 
@@ -101,10 +104,13 @@ curl -s https://jev-api.codiku.com/v1/systemone \
     }
   }'
 
-# Laya / SemIf (same payload, only model changes)
+# Laya / SemIf / official Jev (same payload, only model changes)
 curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
 curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
+curl ... -d '{ "model": "jev", "state": "...", "questions": { ... } }'
 ```
+
+`model=jev` forwards to TypeSafe with `TYPESAFE_REMOTE_MODEL` (default `jev-latest`). Set `TYPESAFE_API_KEY` from [console.typesafe.ai](https://console.typesafe.ai) — never commit the key.
 
 ## Benchmark
 
@@ -112,6 +118,7 @@ curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model semif --n 5
+python scripts/benchmark.py --api-key "$JEV_API_KEY" --model jev --n 5
 
 # Sequential in-process compare on 100 public JevBench decisions (not full JevBench score)
 PYTHONPATH=src python scripts/compare_models.py --limit 100 --repeats 1 --warmup 1 --out /tmp/compare-100.json
@@ -135,6 +142,11 @@ First Laya call may download weights and take minutes; later calls are in-proces
 | `SEMIF_MODE` | `auto` | `direct` per question, `shared` prefix reuse |
 | `SEMIF_GGUF_REPO` / `SEMIF_GGUF_FILE` | bartowski Q4_K_M | CPU weights |
 | `PRELOAD_SEMIF` | `false` | Load SemIf at startup |
+| `TYPESAFE_API_KEY` | — | Required for `model=jev` (console.typesafe.ai) |
+| `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | Official API host |
+| `TYPESAFE_REMOTE_MODEL` | `jev-latest` | Upstream model id sent to TypeSafe |
+| `TYPESAFE_TIMEOUT` | `120` | HTTP timeout (seconds) |
+| `PRELOAD_JEV` | `false` | Probe TypeSafe at startup |
 | `HF_TOKEN` | — | Optional |
 | `MODEL_CACHE_DIR` | `/data/models` | Persist volume |
 | `JEV_DEVICE` | `cpu` | |

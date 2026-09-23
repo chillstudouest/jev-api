@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), laya, or semif. "
+            "Engines: von (default), laya, semif, or jev (official TypeSafe API). "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -126,10 +126,19 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.semif_status.error,
                     "runtime": "qwen3.5-4b-option-logits",
                 },
+                "jev": {
+                    "ready": eng.jev_status.ready,
+                    "backend": eng.jev_status.backend,
+                    "backbone": eng.jev_status.backbone,
+                    "error": eng.jev_status.error,
+                    "runtime": "typesafe-official-http",
+                    "upstream": "https://api.typesafe.ai/v1/systemone",
+                },
                 "note": (
-                    "Switch engine with body.model: von (default), laya, or semif. "
-                    "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
-                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB)."
+                    "Switch engine with body.model: von (default), laya, semif, or jev. "
+                    "model=jev proxies the official TypeSafe API (TYPESAFE_API_KEY). "
+                    "jev-latest / jev-preview / jev-1.13.0 remain local Von aliases. "
+                    "laya-mlx is Apple Silicon only; SemIf CPU uses llama.cpp GGUF."
                 ),
             },
         )
@@ -143,6 +152,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
             raise
         if engine_name == "von" and not eng.von_status.ready:
             raise_usage(503, eng.von_status.not_ready_message(), error_type="server_error")
+        # Official Jev is remote; ready check happens on first ensure_jev (lazy).
         try:
             return eng.systemone(payload)
         except ApiUsageError as exc:
