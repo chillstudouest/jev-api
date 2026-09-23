@@ -140,6 +140,8 @@ def run_model(
         engine.ensure_laya()
     elif engine_name == "semif":
         engine.ensure_semif()
+    elif engine_name == "autojev":
+        engine.ensure_autojev()
     else:
         raise ValueError(f"Unknown engine {engine_name!r}")
 

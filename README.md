@@ -2,13 +2,14 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Three local engines, switched per request with the JSON `model` field:
+Four engines, switched per request with the JSON `model` field:
 
 | `model` | Engine | Weights |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
 | **`semif`** | [SemIf](https://github.com/TheoLeeCJ/SemIf) option-logit readout | `Qwen/Qwen3.5-4B` (GPU BF16) or Q4 GGUF (CPU) |
+| **`autojev`** | Remote [AutoJev-27B](https://huggingface.co/denis-pplx/autojev-27b) via `autojev-serve` | HTTP only — not loaded here |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
 
@@ -17,6 +18,7 @@ Client  →  POST /v1/systemone  →  jev-api
               model=von        →  Von 395M
               model=laya       →  Laya 421M
               model=semif      →  SemIf Qwen3.5-4B
+              model=autojev    →  AUTOJEV_BASE_URL /v1/systemone
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -44,14 +46,16 @@ Accepted `model` values:
 - **Von:** `von` (default), plus aliases `von-latest`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
 - **SemIf:** `semif`, plus aliases `semif-latest`, `semif-phase1`, `openjev`
+- **AutoJev:** `autojev`, plus aliases `autojev-27b`, `autojev-latest` — requires `AUTOJEV_BASE_URL`
 
-`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_SEMIF` to load at startup).
+`/ready` stays Von-based so existing deploys keep working. Extra engines download on first use (`PRELOAD_LAYA` / `PRELOAD_SEMIF` to load at startup). AutoJev is never loaded in-process.
 
 ## Weights
 
 - Von **`wfzyx/von-1.0`** (~1.5 GB) — loaded at startup into `MODEL_CACHE_DIR`
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
 - SemIf **`Qwen/Qwen3.5-4B`** — GPU/MPS uses official SemIf torch (BF16 ~8 GB). CPU uses llama.cpp + `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (~3 GB). Lazy-loaded unless `PRELOAD_SEMIF=true`. Install `pip install -e ".[semif]"` for the CPU path.
+- AutoJev **`denis-pplx/autojev-27b`** — official BF16 is ~49 GiB plus runtime overhead. It does **not** fit the Modal T4 (16 GB) and is not loaded in this container. Point `AUTOJEV_BASE_URL` at a separate `autojev-serve` on an ~80 GB GPU if you want to benchmark it.
 
 Persist `/data/models` across restarts. Do not keep several engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
 
@@ -101,9 +105,10 @@ curl -s https://jev-api.codiku.com/v1/systemone \
     }
   }'
 
-# Laya / SemIf (same payload, only model changes)
+# Laya / SemIf / AutoJev (same payload, only model changes)
 curl ... -d '{ "model": "laya", "state": "...", "questions": { ... } }'
 curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
+curl ... -d '{ "model": "autojev", "state": "...", "questions": { ... } }'
 ```
 
 ## Benchmark
@@ -112,6 +117,9 @@ curl ... -d '{ "model": "semif", "state": "...", "questions": { ... } }'
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model laya --n 20
 python scripts/benchmark.py --api-key "$JEV_API_KEY" --model semif --n 5
+# AutoJev only after AUTOJEV_BASE_URL points at autojev-serve:
+python scripts/benchmark.py --api-key "$JEV_API_KEY" --model autojev --n 5 --timeout 180
+PYTHONPATH=src python scripts/compare_models.py --models autojev --limit 20 --repeats 1 --warmup 1 --out /tmp/compare-autojev.json
 
 # Sequential in-process compare on 100 public JevBench decisions (not full JevBench score)
 PYTHONPATH=src python scripts/compare_models.py --limit 100 --repeats 1 --warmup 1 --out /tmp/compare-100.json
@@ -135,13 +143,24 @@ First Laya call may download weights and take minutes; later calls are in-proces
 | `SEMIF_MODE` | `auto` | `direct` per question, `shared` prefix reuse |
 | `SEMIF_GGUF_REPO` / `SEMIF_GGUF_FILE` | bartowski Q4_K_M | CPU weights |
 | `PRELOAD_SEMIF` | `false` | Load SemIf at startup |
+| `AUTOJEV_BASE_URL` | — | `autojev-serve` origin; required for `model=autojev` |
+| `AUTOJEV_API_KEY` | — | Optional upstream Bearer key |
+| `AUTOJEV_TIMEOUT` | `120` | Seconds for the upstream System One call |
 | `HF_TOKEN` | — | Optional |
 | `MODEL_CACHE_DIR` | `/data/models` | Persist volume |
 | `JEV_DEVICE` | `cpu` | |
 
 ## Resources
 
-Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
+Von ~**395M / ~1.5 GB**. Laya ~**421M / ~0.8 GB**. SemIf Q4 GGUF ~**3 GB** (BF16 ~8 GB, GPU). AutoJev-27B ~**49 GiB BF16** — remote only, not the Modal T4. Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave extra engines lazy.
+
+## AutoJev / T4 (EN)
+
+[AutoJev-27B](https://huggingface.co/denis-pplx/autojev-27b) is a Qwen3.8-27B decision model (published 84.60% vs Jev 82.79%). Official serve needs ~49 GiB of BF16 weights plus overhead — an 80GB-class GPU, not the Modal **T4 (16 GB)**. A 27B forward pass will also be slower than Von 395M / Laya 421M / SemIf 4B on that card. This API therefore only **proxies** `model=autojev` to `AUTOJEV_BASE_URL`. Without that URL, the request returns 503.
+
+## AutoJev / T4 (FR)
+
+[AutoJev-27B](https://huggingface.co/denis-pplx/autojev-27b) est un modèle de décision Qwen3.8-27B (84,60 % publié vs Jev 82,79 %). Le serveur officiel demande ~49 Gio de poids BF16 plus l’overhead — GPU classe 80 Go, pas la **T4 Modal (16 Go)**. Un passage avant 27B sera aussi plus lent que Von 395M / Laya 421M / SemIf 4B sur cette carte. L’API **proxifie** seulement `model=autojev` vers `AUTOJEV_BASE_URL`. Sans cette URL, la requête renvoie 503.
 
 ## Tests
 

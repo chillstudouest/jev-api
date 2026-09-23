@@ -16,6 +16,9 @@ services:
       SEMIF_BACKEND: ${SEMIF_BACKEND:-auto}
       SEMIF_MODE: ${SEMIF_MODE:-auto}
       PRELOAD_SEMIF: ${PRELOAD_SEMIF:-false}
+      AUTOJEV_BASE_URL: ${AUTOJEV_BASE_URL:-}
+      AUTOJEV_API_KEY: ${AUTOJEV_API_KEY:-}
+      AUTOJEV_TIMEOUT: ${AUTOJEV_TIMEOUT:-120}
       SEMIF_SRC: /opt/semif
       MODEL_CACHE_DIR: /data/models
       HF_HOME: /data/models
