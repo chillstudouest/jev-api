@@ -4,27 +4,30 @@ FROM python:3.12-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
       git \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /build
-COPY pyproject.toml README.md ./
-COPY src ./src
+# Layer 1 — heavy, rarely-changing deps (torch CPU wheel ~200MB).
+# Kept BEFORE any COPY of app code so a source change never invalidates it.
+# pip download cache is a BuildKit cache mount, so it survives layer rebuilds.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m venv /opt/venv \
+ && /opt/venv/bin/pip install --upgrade pip \
+ && /opt/venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
 
+# Layer 2 — SemIf source (changes rarely).
 RUN git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# CPU wheels only — no CUDA.
-RUN pip install --upgrade pip \
- && pip install torch --index-url https://download.pytorch.org/whl/cpu \
- && pip install .
+# Layer 3 — app code (changes on every deploy). Only this re-runs.
+WORKDIR /appbuild
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/venv/bin/pip install .
 
 FROM python:3.12-slim-bookworm AS runtime
 
