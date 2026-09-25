@@ -133,8 +133,15 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.glinner_status.error,
                     "runtime": "gliclass-zero-shot",
                 },
+                "jev": {
+                    "ready": bool(cfg.typesafe_api_key),
+                    "backend": "typesafe",
+                    "backbone": cfg.typesafe_model,
+                    "runtime": "official-typesafe-proxy",
+                },
                 "note": (
-                    "Switch engine with body.model: von (default), laya, semif, or glinner. "
+                    "Switch engine with body.model: von (default), jev, laya, semif, or glinner. "
+                    "model=jev proxies to TypeSafe official Jev (TYPESAFE_API_KEY). "
                     "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
                     "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB). "
                     "glinner is Knowledgator GLiClass (GLiNER-family) zero-shot classification."

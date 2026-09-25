@@ -391,7 +391,9 @@ class VerdictEngine:
         parse_questions(request.questions)
         watch.mark("parse")
 
-        if engine_name == "laya":
+        if engine_name == "jev":
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_jev(request, watch)
+        elif engine_name == "laya":
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_laya(request, watch)
         elif engine_name == "semif":
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_semif(request, watch)
@@ -409,6 +411,7 @@ class VerdictEngine:
             parse_ms=watch.steps.get("parse", 0.0),
             format_state_ms=watch.steps.get("format_state", 0.0),
             load_ms=watch.steps.get("load", 0.0),
+            http_ms=watch.steps.get("http", 0.0),
             questions=[QuestionTiming.model_validate(row) for row in watch.questions],
             map_answers_ms=watch.steps.get("map_answers", 0.0),
             total_ms=duration_ms,
@@ -416,7 +419,7 @@ class VerdictEngine:
         logger.info(
             "systemone engine=%s questions=%s state_chars=%s duration_ms=%.1f "
             "inference_ms=%.1f load_ms=%.1f resolve_ms=%.1f parse_ms=%.1f "
-            "format_state_ms=%.1f map_answers_ms=%.1f per_question=%s",
+            "format_state_ms=%.1f http_ms=%.1f map_answers_ms=%.1f per_question=%s",
             engine_name,
             timings.question_count,
             timings.state_chars,
@@ -426,6 +429,7 @@ class VerdictEngine:
             timings.resolve_ms,
             timings.parse_ms,
             timings.format_state_ms,
+            timings.http_ms,
             timings.map_answers_ms,
             [(row.id, row.type, row.ms) for row in timings.questions],
         )
@@ -438,6 +442,25 @@ class VerdictEngine:
             gpu_duration_ms=gpu_duration_ms,
             timings=timings,
         )
+
+    def _evaluate_jev(
+        self, request: SystemOneRequest, watch: Stopwatch
+    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
+        from jev_api.typesafe_runtime import call_typesafe_jev
+
+        raw = watch.measure(
+            "http",
+            lambda: call_typesafe_jev(self.settings, request.state, request.questions),
+        )
+        http_ms = watch.steps.get("http", 0.0)
+        answers = raw["answers"]
+        usage = raw["usage"]
+        gpu_raw = raw.get("gpu_duration_ms")
+        gpu_duration_ms = float(gpu_raw) if isinstance(gpu_raw, (int, float)) else None
+        for qid, raw_q in request.questions.items():
+            qtype = str(raw_q.get("type", "")) if isinstance(raw_q, dict) else ""
+            watch.questions.append({"id": str(qid), "type": qtype, "ms": 0.0})
+        return answers, usage, http_ms, gpu_duration_ms
 
     def _evaluate_von(
         self,

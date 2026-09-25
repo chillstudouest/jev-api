@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     api_version: str = "1.3.0"
     model_name: str = "von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von+laya+semif+glinner"
+    runtime_name: str = "pytorch+von+laya+semif+glinner+jev"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     )
     glinner_max_length: int = Field(default=1024, alias="GLINNER_MAX_LENGTH")
     preload_glinner: bool = Field(default=False, alias="PRELOAD_GLINNER")
+
+    typesafe_api_key: str = Field(default="", alias="TYPESAFE_API_KEY")
+    typesafe_base_url: str = Field(default="https://api.typesafe.ai", alias="TYPESAFE_BASE_URL")
+    typesafe_model: str = Field(default="jev-1.13.0", alias="TYPESAFE_MODEL")
+    typesafe_timeout: float = Field(default=60.0, alias="TYPESAFE_TIMEOUT")
 
 
 @lru_cache

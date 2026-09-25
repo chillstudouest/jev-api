@@ -2,11 +2,12 @@
 
 Self-hosted **Jev / TypeSafe System One** compatible HTTP API.
 
-Four local engines, switched per request with the JSON `model` field:
+Engines, switched per request with the JSON `model` field:
 
 | `model` | Engine | Weights |
 | --- | --- | --- |
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
+| **`jev`** | Official TypeSafe Jev (proxy) | `api.typesafe.ai` (`TYPESAFE_API_KEY`) |
 | **`laya`** | Official [Laya](https://github.com/NandhaKishorM/laya) Python CPU runtime | `convaiinnovations/laya` |
 | **`semif`** | [SemIf](https://github.com/TheoLeeCJ/SemIf) option-logit readout | `Qwen/Qwen3.5-4B` (GPU BF16) or Q4 GGUF (CPU) |
 | **`glinner`** | [GLiClass](https://github.com/Knowledgator/GLiClass) (GLiNER-family zero-shot) | `knowledgator/gliclass-base-v1.0` |
@@ -16,6 +17,7 @@ Four local engines, switched per request with the JSON `model` field:
 ```text
 Client  →  POST /v1/systemone  →  jev-api
               model=von        →  Von 395M
+              model=jev        →  TypeSafe official Jev
               model=laya       →  Laya 421M
               model=semif      →  SemIf Qwen3.5-4B
               model=glinner    →  GLiClass base
@@ -44,6 +46,7 @@ A later win for RAM/CPU/latency on the VPS is the **Rust/Candle** runtime ([`lay
 Accepted `model` values:
 
 - **Von:** `von` (default), plus aliases `von-latest`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
+- **Official Jev:** `jev`, plus aliases `jev-official`, `typesafe`, `typesafe-jev` — needs `TYPESAFE_API_KEY`
 - **Laya:** `laya`, plus aliases `laya-latest`, `laya-1.0`
 - **SemIf:** `semif`, plus aliases `semif-latest`, `semif-phase1`, `openjev`
 - **Gliner:** `glinner`, plus aliases `glinner-latest`, `gliclass`, `gliner-class`

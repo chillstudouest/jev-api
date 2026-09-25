@@ -17,6 +17,12 @@ def test_von_aliases(name: str) -> None:
     assert resolve_engine(name) == "von"
 
 
+@pytest.mark.parametrize("name", ["jev", "jev-official", "typesafe", "typesafe-jev"])
+def test_jev_official_aliases(name: str) -> None:
+    assert resolve_request_model(name) == name
+    assert resolve_engine(name) == "jev"
+
+
 @pytest.mark.parametrize("name", ["laya", "laya-latest", "laya-1.0"])
 def test_laya_aliases(name: str) -> None:
     assert resolve_request_model(name) == name
@@ -260,6 +266,59 @@ def test_engine_dispatches_glinner_without_weights(tmp_path) -> None:
     assert route.choice == "billing"
     assert response.usage.input_tokens == 40
     assert response.inference_ms >= 0
+
+
+def test_engine_dispatches_jev_to_typesafe(tmp_path, monkeypatch) -> None:
+    from jev_api.config import Settings
+    from jev_api.engine import VerdictEngine
+    from jev_api.schemas import ChoiceAnswer, NoulAnswer, SystemOneRequest, Usage
+
+    settings = Settings(
+        jev_api_key="test",
+        typesafe_api_key="ts-key",
+        download_on_startup=False,
+        model_cache_dir=tmp_path / "models",
+    )
+    engine = VerdictEngine(settings)
+
+    def fake_call(_settings: Settings, state: object, questions: dict[str, object]) -> dict[str, object]:
+        assert state == "charged twice"
+        assert "route" in questions
+        return {
+            "model": "jev-1.13.0",
+            "answers": {
+                "route": ChoiceAnswer(
+                    choice="billing",
+                    probabilities={"billing": 0.8, "technical": 0.2},
+                    confidence=0.6,
+                )
+            },
+            "usage": Usage(input_tokens=12, output_tokens=0),
+            "upstream_duration_ms": 90.0,
+            "upstream_inference_ms": 80.0,
+            "gpu_duration_ms": None,
+        }
+
+    monkeypatch.setattr("jev_api.typesafe_runtime.call_typesafe_jev", fake_call)
+    response = engine.systemone(
+        SystemOneRequest(
+            state="charged twice",
+            model="jev",
+            questions={
+                "route": {
+                    "type": "choice",
+                    "instructions": "Which team?",
+                    "criteria": {"billing": "refunds", "technical": "bugs"},
+                }
+            },
+        )
+    )
+    assert response.model == "jev"
+    assert response.timings is not None
+    assert response.timings.engine == "jev"
+    route = response.answers["route"]
+    assert isinstance(route, ChoiceAnswer)
+    assert route.choice == "billing"
 
 
 def test_answers_from_mapping_choice_and_score() -> None:

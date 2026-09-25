@@ -20,6 +20,12 @@ VON_MODELS = (
     "jev-preview",
     "jev-1.13.0",
 )
+JEV_MODELS = (
+    "jev",
+    "jev-official",
+    "typesafe",
+    "typesafe-jev",
+)
 LAYA_MODELS = (
     "laya",
     "laya-latest",
@@ -37,9 +43,9 @@ GLINNER_MODELS = (
     "gliclass",
     "gliner-class",
 )
-SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + SEMIF_MODELS + GLINNER_MODELS
+SUPPORTED_MODELS = VON_MODELS + JEV_MODELS + LAYA_MODELS + SEMIF_MODELS + GLINNER_MODELS
 DEFAULT_MODEL = "von"
-EngineName = Literal["von", "laya", "semif", "glinner"]
+EngineName = Literal["von", "jev", "laya", "semif", "glinner"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -147,6 +153,8 @@ def resolve_request_model(model: str | None) -> str:
 
 def resolve_engine(model: str | None) -> EngineName:
     resolved = resolve_request_model(model)
+    if resolved in JEV_MODELS:
+        return "jev"
     if resolved in LAYA_MODELS:
         return "laya"
     if resolved in SEMIF_MODELS:
@@ -198,6 +206,7 @@ class RequestTimings(BaseModel):
     parse_ms: float = 0
     format_state_ms: float = 0
     load_ms: float = 0
+    http_ms: float = 0
     questions: list[QuestionTiming] = Field(default_factory=list)
     map_answers_ms: float = 0
     total_ms: float = 0

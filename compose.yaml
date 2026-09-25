@@ -5,6 +5,9 @@ services:
       - "8000:8000"
     environment:
       JEV_API_KEY: ${JEV_API_KEY:-dev-key-change-me}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      TYPESAFE_BASE_URL: ${TYPESAFE_BASE_URL:-https://api.typesafe.ai}
+      TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-1.13.0}
       HF_TOKEN: ${HF_TOKEN:-}
       HF_REPO: ${HF_REPO:-wfzyx/von-1.0}
       VON_BACKEND: von

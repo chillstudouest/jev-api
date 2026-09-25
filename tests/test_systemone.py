@@ -211,9 +211,11 @@ def test_model_info(client, auth_headers) -> None:
     assert "laya" in body["accepted_models"]
     assert "semif" in body["accepted_models"]
     assert "glinner" in body["accepted_models"]
+    assert "jev" in body["accepted_models"]
     assert body["extras"]["default_model"] == "von"
     assert "semif" in body["extras"]
     assert "glinner" in body["extras"]
+    assert "jev" in body["extras"]
 
 
 @pytest.mark.parametrize(
@@ -223,6 +225,7 @@ def test_model_info(client, auth_headers) -> None:
         "laya",
         "semif",
         "glinner",
+        "jev",
         "jev-latest",
         "jev-preview",
         "jev-1.13.0",
