@@ -17,6 +17,8 @@ from jev_api.schemas import (
     Answer,
     ChoiceAnswer,
     NoulAnswer,
+    QuestionTiming,
+    RequestTimings,
     ScoreAnswer,
     SystemOneRequest,
     SystemOneResponse,
@@ -25,6 +27,7 @@ from jev_api.schemas import (
     resolve_engine,
     resolve_request_model,
 )
+from jev_api.timing import Stopwatch
 
 logger = logging.getLogger("jev_api.engine")
 
@@ -381,21 +384,51 @@ class VerdictEngine:
             raise ValueError(f"Cannot unload engine {name!r}")
 
     def systemone(self, request: SystemOneRequest) -> SystemOneResponse:
+        watch = Stopwatch()
         model_name = resolve_request_model(request.model)
         engine_name = resolve_engine(model_name)
+        watch.mark("resolve")
         parse_questions(request.questions)
+        watch.mark("parse")
 
-        started = time.perf_counter()
         if engine_name == "laya":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_laya(request)
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_laya(request, watch)
         elif engine_name == "semif":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_semif(request)
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_semif(request, watch)
         elif engine_name == "glinner":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_glinner(request)
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_glinner(request, watch)
         else:
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_von(request, model_name)
-        duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_von(request, model_name, watch)
 
+        duration_ms = watch.total_ms()
+        timings = RequestTimings(
+            engine=engine_name,
+            question_count=len(request.questions),
+            state_chars=_state_chars(request.state),
+            resolve_ms=watch.steps.get("resolve", 0.0),
+            parse_ms=watch.steps.get("parse", 0.0),
+            format_state_ms=watch.steps.get("format_state", 0.0),
+            load_ms=watch.steps.get("load", 0.0),
+            questions=[QuestionTiming.model_validate(row) for row in watch.questions],
+            map_answers_ms=watch.steps.get("map_answers", 0.0),
+            total_ms=duration_ms,
+        )
+        logger.info(
+            "systemone engine=%s questions=%s state_chars=%s duration_ms=%.1f "
+            "inference_ms=%.1f load_ms=%.1f resolve_ms=%.1f parse_ms=%.1f "
+            "format_state_ms=%.1f map_answers_ms=%.1f per_question=%s",
+            engine_name,
+            timings.question_count,
+            timings.state_chars,
+            duration_ms,
+            inference_ms,
+            timings.load_ms,
+            timings.resolve_ms,
+            timings.parse_ms,
+            timings.format_state_ms,
+            timings.map_answers_ms,
+            [(row.id, row.type, row.ms) for row in timings.questions],
+        )
         return SystemOneResponse(
             model=model_name,
             answers=answers,
@@ -403,43 +436,85 @@ class VerdictEngine:
             duration_ms=duration_ms,
             inference_ms=inference_ms,
             gpu_duration_ms=gpu_duration_ms,
+            timings=timings,
         )
 
     def _evaluate_von(
-        self, request: SystemOneRequest, model_name: str
+        self,
+        request: SystemOneRequest,
+        model_name: str,
+        watch: Stopwatch,
     ) -> tuple[dict[str, Answer], Usage, float, float | None]:
         if not self.von_status.ready or self._von is None:
             raise RuntimeError(self.von_status.not_ready_message())
 
-        von_resp, inference_ms, gpu_duration_ms = _time_inference(
-            lambda: self._von.evaluate(
-                state=request.state,
-                questions=request.questions,
-                model=model_name,
-            )
-        )
-        answers = answers_from_mapping(von_resp.answers, source="Von")
-        usage_raw = von_resp.usage
-        usage = Usage(
-            input_tokens=int(getattr(usage_raw, "input_tokens", 0) or 0),
-            output_tokens=int(getattr(usage_raw, "output_tokens", 0) or 0),
-        )
-        return answers, usage, inference_ms, gpu_duration_ms
+        from von.types import Choice, Noul, Score
 
-    def _evaluate_laya(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage, float, float | None]:
+        backend = self._von.backend
+        state_str = watch.measure("format_state", lambda: _format_von_state(request.state))
+        started = time.perf_counter()
+        raw_answers: dict[str, object] = {}
+        total_q_chars = 0
+        gpu_ms: float | None = None
+        for qid, raw in request.questions.items():
+            qtype = str(raw.get("type", "choice")).strip().lower() if isinstance(raw, dict) else getattr(raw, "type", "choice")
+
+            def _run(
+                current: object = raw,
+                kind: str = qtype,
+                question_id: str = str(qid),
+            ) -> object:
+                if isinstance(current, dict):
+                    if kind == "choice":
+                        question = Choice(**current)
+                    elif kind == "noul":
+                        question = Noul(**current)
+                    elif kind == "score":
+                        question = Score(**current)
+                    else:
+                        raise ValueError(f"Unknown question type '{kind}'")
+                else:
+                    question = current
+                if kind == "choice":
+                    return backend.evaluate_choice(question_id, state_str, question)
+                if kind == "noul":
+                    return backend.evaluate_noul(question_id, state_str, question)
+                if kind == "score":
+                    return backend.evaluate_score(question_id, state_str, question)
+                raise ValueError(f"Unknown question type '{kind}'")
+
+            raw_answers[str(qid)] = watch.measure_question(str(qid), qtype, _run)
+            instructions = raw.get("instructions") if isinstance(raw, dict) else getattr(raw, "instructions", "")
+            total_q_chars += len(instructions or "")
+
+        inference_ms = round((time.perf_counter() - started) * 1000.0, 3)
+        answers = watch.measure("map_answers", lambda: answers_from_mapping(raw_answers, source="Von"))
+        usage = Usage(
+            input_tokens=max(1, len(state_str) // 4) + max(1, total_q_chars // 4),
+            output_tokens=len(answers),
+        )
+        return answers, usage, inference_ms, gpu_ms
+
+    def _evaluate_laya(
+        self, request: SystemOneRequest, watch: Stopwatch
+    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
         from jev_api.laya_runtime import laya_system_one
 
-        self.ensure_laya()
+        watch.measure("load", self.ensure_laya)
         if self._laya is None:
             raise RuntimeError(self.laya_status.not_ready_message())
 
         raw, inference_ms, gpu_duration_ms = _time_inference(
             lambda: laya_system_one(self._laya, request.state, request.questions)
         )
+        watch.steps["forward"] = inference_ms
         raw_answers = raw.get("answers")
         if not isinstance(raw_answers, dict):
             raise ValueError("Laya response is missing answers")
-        answers = answers_from_mapping(raw_answers, source="Laya")
+        answers = watch.measure("map_answers", lambda: answers_from_mapping(raw_answers, source="Laya"))
+        for qid, raw_q in request.questions.items():
+            qtype = str(raw_q.get("type", "")) if isinstance(raw_q, dict) else ""
+            watch.questions.append({"id": str(qid), "type": qtype, "ms": 0.0})
         usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
         usage = Usage(
             input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
@@ -447,15 +522,21 @@ class VerdictEngine:
         )
         return answers, usage, inference_ms, gpu_duration_ms
 
-    def _evaluate_semif(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage, float, float | None]:
-        self.ensure_semif()
+    def _evaluate_semif(
+        self, request: SystemOneRequest, watch: Stopwatch
+    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
+        watch.measure("load", self.ensure_semif)
         if self._semif is None:
             raise RuntimeError(self.semif_status.not_ready_message())
 
         raw, inference_ms, gpu_duration_ms = _time_inference(
             lambda: self._semif.evaluate(request.state, request.questions)
         )
-        answers = answers_from_mapping(raw["answers"], source="SemIf")
+        watch.steps["forward"] = inference_ms
+        answers = watch.measure("map_answers", lambda: answers_from_mapping(raw["answers"], source="SemIf"))
+        for qid, raw_q in request.questions.items():
+            qtype = str(raw_q.get("type", "")) if isinstance(raw_q, dict) else ""
+            watch.questions.append({"id": str(qid), "type": qtype, "ms": 0.0})
         usage_raw = raw["usage"]
         usage = Usage(
             input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
@@ -463,15 +544,21 @@ class VerdictEngine:
         )
         return answers, usage, inference_ms, gpu_duration_ms
 
-    def _evaluate_glinner(self, request: SystemOneRequest) -> tuple[dict[str, Answer], Usage, float, float | None]:
-        self.ensure_glinner()
+    def _evaluate_glinner(
+        self, request: SystemOneRequest, watch: Stopwatch
+    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
+        watch.measure("load", self.ensure_glinner)
         if self._glinner is None:
             raise RuntimeError(self.glinner_status.not_ready_message())
 
         raw, inference_ms, gpu_duration_ms = _time_inference(
             lambda: self._glinner.evaluate(request.state, request.questions)
         )
-        answers = answers_from_mapping(raw["answers"], source="Gliner")
+        watch.steps["forward"] = inference_ms
+        answers = watch.measure("map_answers", lambda: answers_from_mapping(raw["answers"], source="Gliner"))
+        for qid, raw_q in request.questions.items():
+            qtype = str(raw_q.get("type", "")) if isinstance(raw_q, dict) else ""
+            watch.questions.append({"id": str(qid), "type": qtype, "ms": 0.0})
         usage_raw = raw["usage"]
         usage = Usage(
             input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
@@ -480,6 +567,25 @@ class VerdictEngine:
         return answers, usage, inference_ms, gpu_duration_ms
 
 
+
+
+def _format_von_state(state: object) -> str:
+    if isinstance(state, str):
+        return state
+    if isinstance(state, dict):
+        return "\n".join(f"{key}: {value}" for key, value in state.items())
+    return str(state)
+
+
+def _state_chars(state: object) -> int:
+    if isinstance(state, str):
+        return len(state)
+    try:
+        import json
+
+        return len(json.dumps(state, ensure_ascii=False, default=str))
+    except TypeError:
+        return len(str(state))
 
 
 def answers_from_mapping(raw_answers: object, source: str) -> dict[str, Answer]:

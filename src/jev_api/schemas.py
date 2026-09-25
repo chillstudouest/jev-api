@@ -184,6 +184,25 @@ class Usage(BaseModel):
     output_tokens: int = 0
 
 
+class QuestionTiming(BaseModel):
+    id: str
+    type: str
+    ms: float
+
+
+class RequestTimings(BaseModel):
+    engine: str
+    question_count: int
+    state_chars: int
+    resolve_ms: float = 0
+    parse_ms: float = 0
+    format_state_ms: float = 0
+    load_ms: float = 0
+    questions: list[QuestionTiming] = Field(default_factory=list)
+    map_answers_ms: float = 0
+    total_ms: float = 0
+
+
 class SystemOneResponse(BaseModel):
     model: str
     answers: dict[str, Answer]
@@ -210,6 +229,13 @@ class SystemOneResponse(BaseModel):
         description=(
             "CUDA event time for inference kernels only; null without CUDA. "
             "Temps kernels CUDA de l'inférence seule ; null sans CUDA."
+        ),
+    )
+    timings: RequestTimings | None = Field(
+        default=None,
+        description=(
+            "Per-step and per-question wall times (ms). "
+            "Temps mur par étape et par question (ms)."
         ),
     )
 

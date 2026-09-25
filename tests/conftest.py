@@ -14,11 +14,14 @@ from jev_api.main import create_app
 from jev_api.schemas import (
     ChoiceAnswer,
     NoulAnswer,
+    QuestionTiming,
+    RequestTimings,
     ScoreAnswer,
     SystemOneRequest,
     SystemOneResponse,
     Usage,
     parse_questions,
+    resolve_engine,
     resolve_request_model,
 )
 
@@ -98,12 +101,23 @@ class FakeEngine(VerdictEngine):
                 answers[qid] = NoulAnswer(noul=noul)
             input_tokens += 50
         duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
+        question_timings = [
+            QuestionTiming(id=qid, type=question.type, ms=0.0)
+            for qid, question in questions.items()
+        ]
         return SystemOneResponse(
             model=model_name,
             answers=answers,
             usage=Usage(input_tokens=input_tokens, output_tokens=len(answers)),
             duration_ms=duration_ms,
             inference_ms=duration_ms,
+            timings=RequestTimings(
+                engine=resolve_engine(model_name),
+                question_count=len(questions),
+                state_chars=len(str(request.state)),
+                questions=question_timings,
+                total_ms=duration_ms,
+            ),
         )
 
 

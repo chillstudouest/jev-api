@@ -32,6 +32,12 @@ def test_choice_two_options_shape(client, auth_headers, jev_fixtures) -> None:
     assert body["gpu_duration_ms"] is None or (
         isinstance(body["gpu_duration_ms"], (int, float)) and body["gpu_duration_ms"] >= 0
     )
+    timings = body["timings"]
+    assert timings["engine"] == "von"
+    assert timings["question_count"] == 1
+    assert timings["state_chars"] > 0
+    assert timings["questions"][0]["id"] == "route"
+    assert timings["questions"][0]["type"] == "choice"
 
 
 def test_choice_three_options(client, auth_headers, jev_fixtures) -> None:
