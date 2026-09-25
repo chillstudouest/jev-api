@@ -34,6 +34,8 @@ image = (
         "pydantic-settings>=2.6.0",
         "httpx>=0.27.0",
         "von-sdk @ git+https://github.com/wfzyx/von.git",
+        "laya>=0.3.5",
+        "gliclass>=0.1.20",
     )
     .run_commands("git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif")
     .env(

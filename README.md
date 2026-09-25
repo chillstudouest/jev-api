@@ -58,7 +58,7 @@ Accepted `model` values:
 - Von **`wfzyx/von-1.0`** (~1.5 GB) — loaded at startup into `MODEL_CACHE_DIR`
 - Laya **`convaiinnovations/laya`** (~0.8 GB) — lazy-loaded unless `PRELOAD_LAYA=true`
 - SemIf **`Qwen/Qwen3.5-4B`** — GPU/MPS uses official SemIf torch (BF16 ~8 GB). CPU uses llama.cpp + `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (~3 GB). Lazy-loaded unless `PRELOAD_SEMIF=true`. Install `pip install -e ".[semif]"` for the CPU path.
-- Gliner **`knowledgator/gliclass-base-v1.0`** (~200–400 MB) — GLiClass zero-shot classifier (GLiNER-family). Lazy-loaded unless `PRELOAD_GLINNER=true`. Install `pip install -e ".[glinner]"`.
+- Gliner **`knowledgator/gliclass-base-v1.0`** (~200–400 MB) — GLiClass zero-shot classifier (GLiNER-family). Lazy-loaded unless `PRELOAD_GLINNER=true`. Installed with the base package (`gliclass`).
 
 Persist `/data/models` across restarts. Do not keep several engines resident on an 8 GiB VPS; switch one at a time or unload between benchmarks. SemIf BF16 will not fit next to Von on that box.
 
