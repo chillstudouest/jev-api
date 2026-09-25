@@ -20,3 +20,10 @@ RUN python -m venv /opt/venv
 RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/venv/bin/pip install --upgrade pip \
  && /opt/venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# Coolify's server cleanup prunes every tagged image that is neither an
+# application image nor labelled coolify.managed=true. This label keeps the
+# local copy of this base image alive so builds can resolve FROM without
+# pulling from GHCR (the package is private).
+LABEL coolify.managed="true"
+

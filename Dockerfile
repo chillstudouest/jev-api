@@ -1,23 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.12-slim-bookworm AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential \
-      git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Layer 1 — heavy, rarely-changing deps (torch CPU wheel ~200MB).
-# Kept BEFORE any COPY of app code so a source change never invalidates it.
-# pip download cache is a BuildKit cache mount, so it survives layer rebuilds.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m venv /opt/venv \
- && /opt/venv/bin/pip install --upgrade pip \
- && /opt/venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Base = python 3.12 + build toolchain + git + venv + torch (CPU).
+# Built by .github/workflows/base-image.yml from Dockerfile.base and kept on the
+# build host (label coolify.managed=true). Bump the tag here AND in that
+# workflow whenever python/torch versions change.
+FROM ghcr.io/chillstudouest/jev-api-base:py3.12-torch-cpu AS builder
 
 # Layer 2 — SemIf source (changes rarely).
 RUN git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif
@@ -68,7 +55,7 @@ ENV PYTHONPATH=/app/src:/opt/semif/src
 USER jev
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=10 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=10 \
   CMD curl -fsS http://127.0.0.1:8000/health || exit 1
 
 CMD ["python", "-m", "uvicorn", "jev_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
