@@ -8,6 +8,7 @@ services:
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       TYPESAFE_BASE_URL: ${TYPESAFE_BASE_URL:-https://api.typesafe.ai}
       TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-1.13.0}
+      TYPESAFE_TIMEOUT: ${TYPESAFE_TIMEOUT:-120}
       HF_TOKEN: ${HF_TOKEN:-}
       HF_REPO: ${HF_REPO:-wfzyx/von-1.0}
       VON_BACKEND: von

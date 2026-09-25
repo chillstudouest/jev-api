@@ -58,6 +58,15 @@ class FakeEngine(VerdictEngine):
             backend="llamacpp",
             name="semif",
         )
+        self.jev_status = EngineStatus(
+            ready=True,
+            loading=False,
+            parameters=None,
+            backbone="https://api.typesafe.ai",
+            device="remote",
+            backend="typesafe-http",
+            name="jev",
+        )
 
     def start_background_load(self) -> None:
         return
