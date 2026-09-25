@@ -9,15 +9,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from jev_api.config import Settings
-from jev_api.engine import VerdictEngine
-from jev_api.schemas import ChoiceAnswer, NoulAnswer, ScoreAnswer, SystemOneRequest, resolve_engine
+from jev_api.engine import VerdictEngine, answers_from_mapping
+from jev_api.schemas import (
+    ChoiceAnswer,
+    NoulAnswer,
+    ScoreAnswer,
+    SystemOneRequest,
+    SystemOneResponse,
+    Usage,
+    resolve_engine,
+)
+
+REMOTE_JEV_ALIASES = {"jev", "jev-official", "typesafe", "typesafe-jev"}
+DEFAULT_TYPESAFE_BASE = "https://api.typesafe.ai"
+DEFAULT_TYPESAFE_MODEL = "jev-1.13.0"
 
 JEVBENCH_SOURCES = (
     (
@@ -126,22 +140,88 @@ def _quality(case: dict[str, Any], answers: dict[str, Any]) -> dict[str, Any]:
     return {"passed": 1 if ok else 0, "total": 1, "ok": ok, "detail": detail}
 
 
+def _call_typesafe(
+    base_url: str,
+    api_key: str,
+    model: str,
+    state: object,
+    questions: dict[str, Any],
+    timeout: float,
+) -> SystemOneResponse:
+    payload = {"state": state, "questions": questions, "model": model}
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/v1/systemone",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    answers = answers_from_mapping(data.get("answers") or {}, source="Jev")
+    usage_raw = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    usage = Usage(
+        input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
+        output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
+    )
+    duration_ms = float(data.get("duration_ms") or 0.0)
+    inference_ms = float(data.get("inference_ms") or duration_ms)
+    return SystemOneResponse(
+        model=str(data.get("model") or model),
+        answers=answers,
+        usage=usage,
+        duration_ms=duration_ms,
+        inference_ms=inference_ms,
+        gpu_duration_ms=data.get("gpu_duration_ms"),
+    )
+
+
 def run_model(
-    engine: VerdictEngine,
+    engine: VerdictEngine | None,
     model: str,
     cases: list[dict[str, Any]],
     repeats: int,
     warmup: int,
+    *,
+    typesafe_base: str,
+    typesafe_key: str,
+    typesafe_model: str,
+    timeout: float,
 ) -> dict[str, Any]:
-    engine_name = resolve_engine(model)
-    if engine_name == "von":
-        engine.load_blocking()
-    elif engine_name == "laya":
-        engine.ensure_laya()
-    elif engine_name == "semif":
-        engine.ensure_semif()
+    remote = model in REMOTE_JEV_ALIASES
+    if remote:
+        if not typesafe_key:
+            raise SystemExit(
+                "model=jev needs TYPESAFE_API_KEY (official TypeSafe cloud). "
+                "Put it in .env.local — JEV_API_KEY is only for self-hosted jev-api."
+            )
+        engine_name = "jev"
+        call = lambda request: _call_typesafe(
+            typesafe_base,
+            typesafe_key,
+            typesafe_model,
+            request.state,
+            request.questions,
+            timeout,
+        )
     else:
-        raise ValueError(f"Unknown engine {engine_name!r}")
+        assert engine is not None
+        engine_name = resolve_engine(model)
+        if engine_name == "von":
+            engine.load_blocking()
+        elif engine_name == "laya":
+            engine.ensure_laya()
+        elif engine_name == "semif":
+            engine.ensure_semif()
+        elif engine_name == "glinner":
+            engine.ensure_glinner()
+        else:
+            raise ValueError(f"Unknown engine {engine_name!r}")
+        call = engine.systemone
 
     latencies: list[float] = []
     case_rows: list[dict[str, Any]] = []
@@ -150,17 +230,21 @@ def run_model(
     total = 0
 
     if warmup > 0 and cases:
-        warm = SystemOneRequest(state=cases[0]["state"], questions=cases[0]["questions"], model=model)
+        warm = SystemOneRequest(state=cases[0]["state"], questions=cases[0]["questions"], model=None if remote else model)
         for _ in range(warmup):
-            engine.systemone(warm)
+            call(warm)
 
     for index, case in enumerate(cases, start=1):
-        request = SystemOneRequest(state=case["state"], questions=case["questions"], model=model)
+        request = SystemOneRequest(
+            state=case["state"],
+            questions=case["questions"],
+            model=None if remote else model,
+        )
         last = None
         times: list[float] = []
         for _ in range(repeats):
             started = time.perf_counter()
-            last = engine.systemone(request)
+            last = call(request)
             times.append((time.perf_counter() - started) * 1000.0)
         assert last is not None
         latencies.extend(times)
@@ -212,7 +296,7 @@ def run_model(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models", default="von,laya,semif")
+    parser.add_argument("--models", default="jev,von,semif,glinner")
     parser.add_argument("--limit", type=int, default=100, help="Number of JevBench public decisions")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=1)
@@ -220,7 +304,33 @@ def main() -> None:
     parser.add_argument("--jevbench-dir", default="./data/jevbench")
     parser.add_argument("--out", default="")
     parser.add_argument("--keep-loaded", action="store_true")
+    parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--typesafe-base",
+        default=os.environ.get("TYPESAFE_BASE_URL", DEFAULT_TYPESAFE_BASE),
+    )
+    parser.add_argument(
+        "--typesafe-key",
+        default=os.environ.get("TYPESAFE_API_KEY", ""),
+    )
+    parser.add_argument(
+        "--typesafe-model",
+        default=os.environ.get("TYPESAFE_MODEL", DEFAULT_TYPESAFE_MODEL),
+    )
     args = parser.parse_args()
+
+    # Load .env.local keys if present (without requiring python-dotenv).
+    for env_path in (Path(".env.local"), Path(".env")):
+        if not env_path.is_file():
+            continue
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    if not args.typesafe_key:
+        args.typesafe_key = os.environ.get("TYPESAFE_API_KEY", "")
 
     cases = load_cases(args.limit, Path(args.jevbench_dir))
     print(f"Loaded {len(cases)} cases", flush=True)
@@ -235,7 +345,17 @@ def main() -> None:
     results: list[dict[str, Any]] = []
     for model in models:
         print(f"=== {model} ===", flush=True)
-        row = run_model(engine, model, cases, args.repeats, args.warmup)
+        row = run_model(
+            engine,
+            model,
+            cases,
+            args.repeats,
+            args.warmup,
+            typesafe_base=args.typesafe_base,
+            typesafe_key=args.typesafe_key,
+            typesafe_model=args.typesafe_model,
+            timeout=args.timeout,
+        )
         results.append(row)
         print(
             json.dumps(
@@ -248,7 +368,7 @@ def main() -> None:
             ),
             flush=True,
         )
-        if not args.keep_loaded:
+        if not args.keep_loaded and model not in REMOTE_JEV_ALIASES:
             engine.unload(resolve_engine(model))
             import gc
 
@@ -266,7 +386,8 @@ def main() -> None:
         "n_cases": len(cases),
         "note": (
             "Accuracy on first N public JevBench decisions (easy+original). "
-            "Not the official JevBench Score (missing hard/calibration/speed/cost axes)."
+            "Not the official JevBench Score (missing hard/calibration/speed/cost axes). "
+            "model=jev hits TypeSafe cloud; others are local."
         ),
         "models": [
             {

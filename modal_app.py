@@ -16,13 +16,15 @@ MODEL_CACHE_DIR = "/data/models"
 # Persistent model cache (~1.5 GB) shared across warm starts.
 model_cache = modal.Volume.from_name("jev-model-cache", create_if_missing=True)
 
-# Mirror of the repo's Dockerfile deps, but with CUDA torch (the Dockerfile
-# pins CPU wheels, so it is not reused here — GPU requires CUDA wheels).
+# CUDA wheels (PyPI `torch` is CPU-only — SemIf 4B on CPU ≈ 1 min / request).
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "build-essential")
     .pip_install(
         "torch",
+        extra_index_url="https://download.pytorch.org/whl/cu124",
+    )
+    .pip_install(
         "transformers>=4.48.0",
         "accelerate>=0.26.0",
         "huggingface_hub>=0.26.0",
@@ -33,19 +35,23 @@ image = (
         "httpx>=0.27.0",
         "von-sdk @ git+https://github.com/wfzyx/von.git",
     )
+    .run_commands("git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif")
     .env(
         {
             "PYTHONPATH": "/root/src",
             "VON_BACKEND": "von",
             "JEV_DEVICE": "cuda",
+            "SEMIF_BACKEND": "torch",
+            "SEMIF_SRC": "/opt/semif",
+            "PRELOAD_SEMIF": "true",
             "MODEL_CACHE_DIR": MODEL_CACHE_DIR,
             "HF_HOME": MODEL_CACHE_DIR,
             "HUGGINGFACE_HUB_CACHE": MODEL_CACHE_DIR,
             "DOWNLOAD_ON_STARTUP": "true",
+            "JEV_SOURCE_REV": "semif-cuda-cu124",
         }
     )
-    # add_local_* must be the LAST build step; copy=True bakes src into the image.
-    .add_local_dir("src", remote_path="/root/src", copy=True)
+    .add_local_dir("src", remote_path="/root/src")
 )
 
 

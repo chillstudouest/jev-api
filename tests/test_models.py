@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jev_api.engine import answers_from_mapping
+from jev_api.engine import _time_inference, answers_from_mapping
 from jev_api.schemas import ApiUsageError, NoulAnswer, resolve_engine, resolve_request_model
 
 
@@ -31,6 +31,27 @@ def test_semif_aliases(name: str) -> None:
     assert resolve_engine(name) == "semif"
 
 
+
+
+@pytest.mark.parametrize("name", ["glinner", "glinner-latest", "gliclass", "gliner-class"])
+def test_glinner_aliases(name: str) -> None:
+    assert resolve_request_model(name) == name
+    assert resolve_engine(name) == "glinner"
+
+
+def test_time_inference_reports_wall_and_optional_gpu() -> None:
+    result, inference_ms, gpu_ms = _time_inference(lambda: 42)
+    assert result == 42
+    assert inference_ms >= 0
+    try:
+        import torch
+    except ImportError:
+        assert gpu_ms is None
+        return
+    if torch.cuda.is_available():
+        assert gpu_ms is not None and gpu_ms >= 0
+    else:
+        assert gpu_ms is None
 
 
 def test_unknown_model() -> None:
@@ -188,6 +209,57 @@ def test_engine_dispatches_semif_without_weights(tmp_path) -> None:
     assert isinstance(NoulAnswer.model_validate(converted["urgent"]), NoulAnswer)
 
 
+
+
+def test_engine_dispatches_glinner_without_weights(tmp_path) -> None:
+    from jev_api.config import Settings
+    from jev_api.engine import VerdictEngine
+    from jev_api.schemas import ChoiceAnswer, SystemOneRequest
+
+    settings = Settings(
+        jev_api_key="test",
+        download_on_startup=False,
+        model_cache_dir=tmp_path / "models",
+    )
+    engine = VerdictEngine(settings)
+    engine.von_status.ready = True
+    engine.glinner_status.ready = True
+
+    class StubGliner:
+        def evaluate(self, state: object, questions: dict[str, object]) -> dict[str, object]:
+            assert state == "charged twice"
+            return {
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "billing",
+                        "probabilities": {"billing": 0.7, "technical": 0.3},
+                        "confidence": 0.4,
+                    }
+                },
+                "usage": {"input_tokens": 40, "output_tokens": 0},
+            }
+
+    engine._glinner = StubGliner()
+    response = engine.systemone(
+        SystemOneRequest(
+            state="charged twice",
+            model="glinner",
+            questions={
+                "route": {
+                    "type": "choice",
+                    "instructions": "Which team?",
+                    "criteria": {"billing": "refunds", "technical": "bugs"},
+                }
+            },
+        )
+    )
+    assert response.model == "glinner"
+    route = response.answers["route"]
+    assert isinstance(route, ChoiceAnswer)
+    assert route.choice == "billing"
+    assert response.usage.input_tokens == 40
+    assert response.inference_ms >= 0
 
 
 def test_answers_from_mapping_choice_and_score() -> None:

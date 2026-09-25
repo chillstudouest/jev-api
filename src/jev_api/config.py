@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     api_version: str = "1.3.0"
     model_name: str = "von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von+laya+semif"
+    runtime_name: str = "pytorch+von+laya+semif+glinner"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     semif_max_tokens: int = Field(default=4096, alias="SEMIF_MAX_TOKENS")
     semif_llama_threads: int | None = Field(default=None, alias="SEMIF_LLAMA_THREADS")
     preload_semif: bool = Field(default=False, alias="PRELOAD_SEMIF")
+
+    glinner_hf_repo: str = Field(
+        default="knowledgator/gliclass-base-v1.0", alias="GLINNER_HF_REPO"
+    )
+    glinner_max_length: int = Field(default=1024, alias="GLINNER_MAX_LENGTH")
+    preload_glinner: bool = Field(default=False, alias="PRELOAD_GLINNER")
 
 
 @lru_cache

@@ -1,14 +1,14 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
 Protocol-compatible with POST /v1/systemone.
-Engines: `von`, `laya`, and `semif` (SemIf / Qwen3.5-4B).
+Engines: `von`, `laya`, `semif`, and `glinner` (GLiClass / GLiNER-family).
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 VON_MODELS = (
     "von",
@@ -31,9 +31,15 @@ SEMIF_MODELS = (
     "semif-phase1",
     "openjev",
 )
-SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + SEMIF_MODELS
+GLINNER_MODELS = (
+    "glinner",
+    "glinner-latest",
+    "gliclass",
+    "gliner-class",
+)
+SUPPORTED_MODELS = VON_MODELS + LAYA_MODELS + SEMIF_MODELS + GLINNER_MODELS
 DEFAULT_MODEL = "von"
-EngineName = Literal["von", "laya", "semif"]
+EngineName = Literal["von", "laya", "semif", "glinner"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -145,6 +151,8 @@ def resolve_engine(model: str | None) -> EngineName:
         return "laya"
     if resolved in SEMIF_MODELS:
         return "semif"
+    if resolved in GLINNER_MODELS:
+        return "glinner"
     return "von"
 
 
@@ -180,7 +188,30 @@ class SystemOneResponse(BaseModel):
     model: str
     answers: dict[str, Answer]
     usage: Usage
-    duration_ms: float = Field(description="Server-side inference duration in milliseconds")
+    @computed_field
+    @property
+    def input_tokens(self) -> int:
+        return self.usage.input_tokens
+
+    duration_ms: float = Field(
+        description=(
+            "Wall time of evaluate() including SemIf/Laya load, excluding HTTP. "
+            "Temps mur evaluate() (load SemIf/Laya inclus), hors HTTP."
+        )
+    )
+    inference_ms: float = Field(
+        description=(
+            "Wall time of the model forward only, excluding load and HTTP. "
+            "Temps mur de l'inférence seule, hors chargement et HTTP."
+        )
+    )
+    gpu_duration_ms: float | None = Field(
+        default=None,
+        description=(
+            "CUDA event time for inference kernels only; null without CUDA. "
+            "Temps kernels CUDA de l'inférence seule ; null sans CUDA."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):

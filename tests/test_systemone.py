@@ -25,6 +25,13 @@ def test_choice_two_options_shape(client, auth_headers, jev_fixtures) -> None:
     assert body["usage"]["output_tokens"] >= 0
     assert isinstance(body["duration_ms"], (int, float))
     assert body["duration_ms"] >= 0
+    assert isinstance(body["inference_ms"], (int, float))
+    assert body["inference_ms"] >= 0
+    assert body["input_tokens"] == body["usage"]["input_tokens"]
+    assert "gpu_duration_ms" in body
+    assert body["gpu_duration_ms"] is None or (
+        isinstance(body["gpu_duration_ms"], (int, float)) and body["gpu_duration_ms"] >= 0
+    )
 
 
 def test_choice_three_options(client, auth_headers, jev_fixtures) -> None:
@@ -197,13 +204,25 @@ def test_model_info(client, auth_headers) -> None:
     assert "von" in body["accepted_models"]
     assert "laya" in body["accepted_models"]
     assert "semif" in body["accepted_models"]
+    assert "glinner" in body["accepted_models"]
     assert body["extras"]["default_model"] == "von"
     assert "semif" in body["extras"]
+    assert "glinner" in body["extras"]
 
 
 @pytest.mark.parametrize(
     "model",
-    ["von", "laya", "semif", "jev-latest", "jev-preview", "jev-1.13.0", "von-option-marker", None],
+    [
+        "von",
+        "laya",
+        "semif",
+        "glinner",
+        "jev-latest",
+        "jev-preview",
+        "jev-1.13.0",
+        "von-option-marker",
+        None,
+    ],
 )
 def test_accepted_model_aliases(client, auth_headers, model) -> None:
     payload = {

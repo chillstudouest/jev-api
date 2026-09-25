@@ -103,6 +103,7 @@ class FakeEngine(VerdictEngine):
             answers=answers,
             usage=Usage(input_tokens=input_tokens, output_tokens=len(answers)),
             duration_ms=duration_ms,
+            inference_ms=duration_ms,
         )
 
 

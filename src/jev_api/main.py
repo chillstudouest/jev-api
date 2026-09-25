@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), laya, or semif. "
+            "Engines: von (default), laya, semif, or glinner. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -126,10 +126,18 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "error": eng.semif_status.error,
                     "runtime": "qwen3.5-4b-option-logits",
                 },
+                "glinner": {
+                    "ready": eng.glinner_status.ready,
+                    "backend": eng.glinner_status.backend,
+                    "backbone": eng.glinner_status.backbone,
+                    "error": eng.glinner_status.error,
+                    "runtime": "gliclass-zero-shot",
+                },
                 "note": (
-                    "Switch engine with body.model: von (default), laya, or semif. "
+                    "Switch engine with body.model: von (default), laya, semif, or glinner. "
                     "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
-                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB)."
+                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB). "
+                    "glinner is Knowledgator GLiClass (GLiNER-family) zero-shot classification."
                 ),
             },
         )
