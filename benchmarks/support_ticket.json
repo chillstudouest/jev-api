@@ -1,0 +1,86 @@
+{
+  "model": "<model>",
+  "state": {
+    "channel": "email",
+    "received_at": "2026-09-25T09:14:00Z",
+    "customer": {
+      "id": "cus_1842",
+      "plan": "pro",
+      "tenure_months": 14,
+      "mrr_eur": 89,
+      "nps_last": 8
+    },
+    "thread": [
+      {
+        "from": "customer",
+        "text": "You charged me twice for September (89€ on the 3rd and again on the 4th). I also cannot export invoices since the 18th — the button spins then 500s. If this is not refunded and the export fixed before Friday I am cancelling."
+      },
+      {
+        "from": "agent",
+        "text": "We see two successful charges on the same invoice INV-2091. Export errors are tracked as INC-441."
+      }
+    ],
+    "billing": {
+      "invoice": "INV-2091",
+      "charges": [
+        {
+          "id": "ch_1",
+          "amount_eur": 89,
+          "status": "succeeded"
+        },
+        {
+          "id": "ch_2",
+          "amount_eur": 89,
+          "status": "succeeded"
+        }
+      ],
+      "refunded": false
+    },
+    "incident": {
+      "id": "INC-441",
+      "symptom": "invoice export HTTP 500",
+      "users_affected": 37,
+      "status": "investigating"
+    }
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": "Which team should own the next reply?",
+      "criteria": {
+        "billing": "Duplicate charge, refund, invoice, or payment dispute",
+        "technical": "Product bug, outage, or export failure",
+        "retention": "Cancellation threat or plan downgrade",
+        "mixed": "Billing and product failure in the same thread, needs a joint owner"
+      }
+    },
+    "severity": {
+      "type": "score",
+      "instructions": "How severe is this for the customer right now?",
+      "criteria": [
+        "Noise, no money or access impact",
+        "Inconvenience, workaround exists",
+        "Money or core feature blocked, deadline named",
+        "Churn or legal exposure this week"
+      ]
+    },
+    "churn_risk": {
+      "type": "noul",
+      "instructions": "Will this customer cancel within 7 days if nothing is fixed?"
+    },
+    "refund_due": {
+      "type": "noul",
+      "instructions": "Is a refund of the duplicate 89€ charge clearly due?"
+    },
+    "next_action": {
+      "type": "choice",
+      "instructions": "What should the agent do first?",
+      "criteria": {
+        "refund_now": "Refund the duplicate charge before anything else",
+        "escalate_incident": "Page the on-call about INC-441",
+        "reply_eta": "Send a holding reply with an ETA and no action yet",
+        "save_offer": "Offer a credit or pause to stop the cancellation"
+      }
+    }
+  }
+}

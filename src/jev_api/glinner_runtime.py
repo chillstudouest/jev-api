@@ -12,7 +12,6 @@ Two backends, picked with `GLINNER_BACKEND`:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from collections.abc import Callable
@@ -42,13 +41,19 @@ class GlinerRuntime:
         return evaluate_glinner(self, state, questions)
 
 
+def _flatten(value: object, path: str) -> list[str]:
+    if isinstance(value, dict):
+        return [line for key, item in value.items() for line in _flatten(item, f"{path} {key}".strip())]
+    if isinstance(value, list):
+        return [line for item in value for line in _flatten(item, path)]
+    return [f"{path}: {value}" if path else str(value)]
+
+
 def _state_text(state: object) -> str:
+    # Decide reads prose far better than JSON: flatten structured state into "path: value" lines.
     if isinstance(state, str):
         return state
-    try:
-        return json.dumps(state, ensure_ascii=False, sort_keys=True)
-    except TypeError:
-        return str(state)
+    return "\n".join(_flatten(state, ""))
 
 
 def _confidence(probabilities: dict[str, float]) -> float:

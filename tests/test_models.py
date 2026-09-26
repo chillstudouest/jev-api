@@ -261,3 +261,12 @@ def test_gliner_onnx_encode_places_label_markers() -> None:
     # ( [P] prompt ( [L] billing [L] technical ) ) [SEP_STRUCT] ( [P] prompt ( [L] true [L] false ) ) [SEP_TEXT] refund me .
     assert positions == [4, 6, 15, 17]
     assert len(ids) == 25
+
+
+def test_gliner_state_text_flattens_structured_state() -> None:
+    from jev_api.glinner_runtime import _state_text
+
+    assert _state_text("plain") == "plain"
+    assert _state_text({"customer": {"plan": "pro"}, "thread": [{"text": "hi"}, {"text": "yo"}]}) == (
+        "customer plan: pro\nthread text: hi\nthread text: yo"
+    )
