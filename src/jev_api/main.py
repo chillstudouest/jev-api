@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), glinner, or jev. "
+            "Engines: von (default), glinner, gliner-von, or jev. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -126,9 +126,9 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "runtime": "official-typesafe-proxy",
                 },
                 "note": (
-                    "Switch engine with body.model: von (default), jev, or glinner. "
+                    "Switch engine with body.model: von (default), jev, glinner, or gliner-von. "
                     "model=jev proxies to TypeSafe official Jev (TYPESAFE_API_KEY). "
-                    "glinner is Fastino GLiNER2.5-Decide."
+                    "glinner is Fastino GLiNER2.5-Decide. gliner-von sends noul to Von, choice / score to Gliner."
                 ),
             },
         )
@@ -140,7 +140,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         except ApiUsageError as exc:
             raise_usage(400, exc.message, exc.error_type)
             raise
-        if engine_name == "von" and not eng.von_status.ready:
+        if engine_name in ("von", "gliner-von") and not eng.von_status.ready:
             raise_usage(503, eng.von_status.not_ready_message(), error_type="server_error")
         try:
             return eng.systemone(payload)

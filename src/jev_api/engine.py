@@ -276,6 +276,8 @@ class VerdictEngine:
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_jev(request, watch)
         elif engine_name == "glinner":
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_glinner(request, watch)
+        elif engine_name == "gliner-von":
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_gliner_von(request, model_name, watch)
         else:
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_von(request, model_name, watch)
 
@@ -394,6 +396,43 @@ class VerdictEngine:
             output_tokens=len(answers),
         )
         return answers, usage, inference_ms, gpu_ms
+
+    def _evaluate_gliner_von(
+        self,
+        request: SystemOneRequest,
+        model_name: str,
+        watch: Stopwatch,
+    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
+        """noul goes to Von, choice / score to Gliner; answers keep the request order."""
+        noul: dict[str, Any] = {}
+        rest: dict[str, Any] = {}
+        for qid, raw in request.questions.items():
+            qtype = str(raw.get("type", "")).strip().lower() if isinstance(raw, dict) else ""
+            (noul if qtype == "noul" else rest)[qid] = raw
+
+        answers: dict[str, Answer] = {}
+        input_tokens = output_tokens = 0
+        inference_ms = 0.0
+        if noul:
+            von_answers, von_usage, von_ms, _ = self._evaluate_von(
+                request.model_copy(update={"questions": noul}), model_name, watch
+            )
+            answers.update(von_answers)
+            input_tokens += von_usage.input_tokens
+            output_tokens += von_usage.output_tokens
+            inference_ms += von_ms
+        if rest:
+            gliner_answers, gliner_usage, gliner_ms, _ = self._evaluate_glinner(
+                request.model_copy(update={"questions": rest}), watch
+            )
+            answers.update(gliner_answers)
+            input_tokens += gliner_usage.input_tokens
+            output_tokens += gliner_usage.output_tokens
+            inference_ms += gliner_ms
+
+        ordered = {str(qid): answers[str(qid)] for qid in request.questions}
+        usage = Usage(input_tokens=input_tokens, output_tokens=output_tokens)
+        return ordered, usage, round(inference_ms, 3), None
 
     def _evaluate_glinner(
         self, request: SystemOneRequest, watch: Stopwatch

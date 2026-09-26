@@ -32,9 +32,14 @@ GLINNER_MODELS = (
     "decide",
     "gliner2-decide",
 )
-SUPPORTED_MODELS = VON_MODELS + JEV_MODELS + GLINNER_MODELS
+# Gliner answers choice / score, Von answers noul (best of each on JevBench).
+GLINER_VON_MODELS = (
+    "gliner-von",
+    "gliner-von-latest",
+)
+SUPPORTED_MODELS = VON_MODELS + JEV_MODELS + GLINNER_MODELS + GLINER_VON_MODELS
 DEFAULT_MODEL = "von"
-EngineName = Literal["von", "jev", "glinner"]
+EngineName = Literal["von", "jev", "glinner", "gliner-von"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -146,6 +151,8 @@ def resolve_engine(model: str | None) -> EngineName:
         return "jev"
     if resolved in GLINNER_MODELS:
         return "glinner"
+    if resolved in GLINER_VON_MODELS:
+        return "gliner-von"
     return "von"
 
 

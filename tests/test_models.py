@@ -270,3 +270,45 @@ def test_gliner_state_text_flattens_structured_state() -> None:
     assert _state_text({"customer": {"plan": "pro"}, "thread": [{"text": "hi"}, {"text": "yo"}]}) == (
         "customer plan: pro\nthread text: hi\nthread text: yo"
     )
+
+
+def test_gliner_von_routes_noul_to_von_and_rest_to_gliner(tmp_path, monkeypatch) -> None:
+    from jev_api.config import Settings
+    from jev_api.engine import VerdictEngine
+    from jev_api.schemas import ChoiceAnswer, NoulAnswer, SystemOneRequest, Usage
+
+    engine = VerdictEngine(
+        Settings(jev_api_key="test", download_on_startup=False, model_cache_dir=tmp_path / "models")
+    )
+    seen: dict[str, list[str]] = {}
+
+    def fake_von(request: SystemOneRequest, _model: str, _watch: object) -> tuple[dict[str, object], Usage, float, None]:
+        seen["von"] = list(request.questions)
+        return {"urgent": NoulAnswer(noul=0.9)}, Usage(input_tokens=3, output_tokens=1), 10.0, None
+
+    def fake_gliner(request: SystemOneRequest, _watch: object) -> tuple[dict[str, object], Usage, float, None]:
+        seen["gliner"] = list(request.questions)
+        route = ChoiceAnswer(choice="billing", probabilities={"billing": 0.9, "technical": 0.1}, confidence=0.8)
+        return {"route": route}, Usage(input_tokens=5, output_tokens=1), 20.0, None
+
+    monkeypatch.setattr(engine, "_evaluate_von", fake_von)
+    monkeypatch.setattr(engine, "_evaluate_glinner", fake_gliner)
+    response = engine.systemone(
+        SystemOneRequest(
+            state="charged twice",
+            model="gliner-von",
+            questions={
+                "urgent": {"type": "noul", "instructions": "Urgent?"},
+                "route": {
+                    "type": "choice",
+                    "instructions": "Which team?",
+                    "criteria": {"billing": "refunds", "technical": "bugs"},
+                },
+            },
+        )
+    )
+    assert seen == {"von": ["urgent"], "gliner": ["route"]}
+    assert list(response.answers) == ["urgent", "route"]
+    assert response.model == "gliner-von"
+    assert response.usage.input_tokens == 8
+    assert response.inference_ms == 30.0

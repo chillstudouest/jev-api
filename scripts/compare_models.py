@@ -215,6 +215,9 @@ def run_model(
             engine.load_blocking()
         elif engine_name == "glinner":
             engine.ensure_glinner()
+        elif engine_name == "gliner-von":
+            engine.load_blocking()
+            engine.ensure_glinner()
         else:
             raise ValueError(f"Unknown engine {engine_name!r}")
         call = engine.systemone
@@ -365,7 +368,9 @@ def main() -> None:
             flush=True,
         )
         if not args.keep_loaded and model not in REMOTE_JEV_ALIASES:
-            engine.unload(resolve_engine(model))
+            engine_name = resolve_engine(model)
+            for name in ("von", "glinner") if engine_name == "gliner-von" else (engine_name,):
+                engine.unload(name)
             import gc
 
             gc.collect()

@@ -9,6 +9,7 @@ Engines, switched per request with the JSON `model` field:
 | **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
 | **`jev`** | Official TypeSafe Jev (proxy) | `api.typesafe.ai` (`TYPESAFE_API_KEY`) |
 | **`glinner`** | [GLiNER2.5-Decide](https://huggingface.co/fastino/GLiNER2.5-Decide), ONNX on CPU by default | [`nishparadox/gliner2.5-decide-onnx`](https://huggingface.co/nishparadox/gliner2.5-decide-onnx) (fp32) |
+| **`gliner-von`** | `noul` → Von, `choice` / `score` → Gliner, in one request | both of the above |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
 
@@ -17,6 +18,7 @@ Client  →  POST /v1/systemone  →  jev-api
               model=von        →  Von 395M
               model=jev        →  TypeSafe official Jev
               model=glinner    →  GLiNER2.5-Decide
+              model=gliner-von →  noul: Von · choice/score: Gliner
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -36,6 +38,7 @@ Accepted `model` values:
 - **Von:** `von` (default), plus aliases `von-latest`, `von-preview`, `von-1.0.0`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Official Jev:** `jev`, plus aliases `jev-official`, `typesafe`, `typesafe-jev` — needs `TYPESAFE_API_KEY`
 - **Gliner:** `glinner`, plus aliases `glinner-latest`, `decide`, `gliner2-decide`
+- **Gliner + Von:** `gliner-von`, plus alias `gliner-von-latest`
 
 `/ready` stays Von-based so existing deploys keep working. Gliner downloads on first use (`PRELOAD_GLINNER=true` to load at startup).
 
@@ -61,10 +64,12 @@ Accepted `model` values:
   | Engine | Accuracy | choice | noul | score | p50 |
   | --- | ---: | ---: | ---: | ---: | ---: |
   | TypeSafe Jev (`jev-latest`, remote) | 99.2 % | 72/72 | 35/36 | 12/12 | 284 ms |
-  | GLiNER2.5-Decide | 80.0 % | 63/72 | 21/36 | 12/12 | 229 ms |
+  | `gliner-von` (2026-09-27) | 84.2 % | 63/72 | 26/36 | 12/12 | 81 ms |
+  | GLiNER2.5-Decide (onnx fp32, 2026-09-27) | 80.0 % | 63/72 | 21/36 | 12/12 | 73 ms |
+  | Von | 79.2 % | 57/72 | 26/36 | 12/12 | 103 ms |
   | GLiClass base (removed) | 64.2 % | 55/72 | 18/36 | 4/12 | 71 ms |
 
-  Decide is near chance on `noul`; label wording (`true`/`false`, `yes`/`no`, descriptions as labels) makes no difference. The [Core ML port](https://huggingface.co/FluidInference/gliner2-5-decide-coreml) is Apple Silicon only and does not run on the VPS.
+  `noul` splits into `fact` (Von 12/12, Decide 10/12), `policy` (7/12, 5/12) and `adequacy` (7/12, 6/12): the last two need applying a rule or checking an answer, which neither encoder does. Decide is near chance on them; label wording (`true`/`false`, `yes`/`no`, descriptions as labels) makes no difference. The [Core ML port](https://huggingface.co/FluidInference/gliner2-5-decide-coreml) is Apple Silicon only and does not run on the VPS.
 
 Persist `/data/models` across restarts. Von and Gliner (onnx fp32) together take ~3.5 GB on the 8 GiB VPS.
 
