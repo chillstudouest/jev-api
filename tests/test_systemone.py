@@ -151,43 +151,6 @@ def test_api_v1_alias(client, auth_headers, jev_fixtures) -> None:
     assert "route" in response.json()["answers"]
 
 
-
-
-def test_semif_model_switch(client, auth_headers) -> None:
-    payload = {
-        "state": "Charged twice for September and cancelling Friday unless refunded.",
-        "model": "semif",
-        "questions": {
-            "route": {
-                "type": "choice",
-                "instructions": "Which team should handle this?",
-                "criteria": {"billing": "Payments and refunds", "technical": "Bugs and outages"},
-            }
-        },
-    }
-    body = _post(client, auth_headers, payload).json()
-    assert body["model"] == "semif"
-    assert body["answers"]["route"]["choice"] in {"billing", "technical"}
-
-
-def test_laya_model_switch(client, auth_headers) -> None:
-    payload = {
-        "state": "Charged twice for September and cancelling Friday unless refunded.",
-        "model": "laya",
-        "questions": {
-            "route": {
-                "type": "choice",
-                "instructions": "Which team should handle this?",
-                "criteria": {"billing": "Payments and refunds", "technical": "Bugs and outages"},
-            }
-        },
-    }
-    body = _post(client, auth_headers, payload).json()
-    assert body["model"] == "laya"
-    assert body["answers"]["route"]["type"] == "choice"
-    assert body["answers"]["route"]["choice"] in {"billing", "technical"}
-
-
 def test_default_model_is_von(client, auth_headers) -> None:
     payload = {
         "state": "x",
@@ -208,12 +171,9 @@ def test_model_info(client, auth_headers) -> None:
     assert body["protocol"] == "jev-systemone"
     assert body["engine"] == "von-option-marker-395m"
     assert "von" in body["accepted_models"]
-    assert "laya" in body["accepted_models"]
-    assert "semif" in body["accepted_models"]
     assert "glinner" in body["accepted_models"]
     assert "jev" in body["accepted_models"]
     assert body["extras"]["default_model"] == "von"
-    assert "semif" in body["extras"]
     assert "glinner" in body["extras"]
     assert "jev" in body["extras"]
 
@@ -222,8 +182,6 @@ def test_model_info(client, auth_headers) -> None:
     "model",
     [
         "von",
-        "laya",
-        "semif",
         "glinner",
         "jev",
         "jev-latest",

@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.environ.get("JEV_BASE_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--api-key", default=os.environ.get("JEV_API_KEY", ""))
     parser.add_argument("--wait-ready-s", type=int, default=600)
-    parser.add_argument("--model", default="von", help="von or laya")
+    parser.add_argument("--model", default="von", help="von or glinner")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
 

@@ -131,7 +131,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--api-key", required=True)
-    parser.add_argument("--model", required=True, choices=["von", "semif", "laya"])
+    parser.add_argument("--model", required=True, choices=["von", "glinner"])
     parser.add_argument("--n", type=int, default=50)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=600.0)

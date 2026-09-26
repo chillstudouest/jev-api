@@ -6,10 +6,7 @@
 # workflow whenever python/torch versions change.
 FROM ghcr.io/chillstudouest/jev-api-base:py3.12-torch-cpu AS builder
 
-# Layer 2 — SemIf source (changes rarely).
-RUN git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif
-
-# Layer 3 — app code (changes on every deploy). Only this re-runs.
+# Layer 2 — app code (changes on every deploy). Only this re-runs.
 WORKDIR /appbuild
 COPY pyproject.toml README.md ./
 COPY src ./src
@@ -25,9 +22,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/data/models \
     HUGGINGFACE_HUB_CACHE=/data/models \
     VON_BACKEND=von \
-    PRELOAD_LAYA=false \
-    PRELOAD_SEMIF=false \
-    SEMIF_SRC=/opt/semif \
+    PRELOAD_GLINNER=false \
     JEV_DEVICE=cpu \
     HOST=0.0.0.0 \
     PORT=8000 \
@@ -44,13 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chown -R jev:jev /data
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /opt/semif /opt/semif
 
 WORKDIR /app
 COPY --chown=jev:jev src ./src
 COPY --chown=jev:jev pyproject.toml README.md ./
 
-ENV PYTHONPATH=/app/src:/opt/semif/src
+ENV PYTHONPATH=/app/src
 
 USER jev
 EXPOSE 8000

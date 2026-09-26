@@ -1,7 +1,7 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
 Protocol-compatible with POST /v1/systemone.
-Engines: `von`, `laya`, `semif`, and `glinner` (GLiClass / GLiNER-family).
+Engines: `von`, `glinner` (GLiNER2.5-Decide), and `jev` (official TypeSafe proxy).
 """
 
 from __future__ import annotations
@@ -26,26 +26,15 @@ JEV_MODELS = (
     "typesafe",
     "typesafe-jev",
 )
-LAYA_MODELS = (
-    "laya",
-    "laya-latest",
-    "laya-1.0",
-)
-SEMIF_MODELS = (
-    "semif",
-    "semif-latest",
-    "semif-phase1",
-    "openjev",
-)
 GLINNER_MODELS = (
     "glinner",
     "glinner-latest",
-    "gliclass",
-    "gliner-class",
+    "decide",
+    "gliner2-decide",
 )
-SUPPORTED_MODELS = VON_MODELS + JEV_MODELS + LAYA_MODELS + SEMIF_MODELS + GLINNER_MODELS
+SUPPORTED_MODELS = VON_MODELS + JEV_MODELS + GLINNER_MODELS
 DEFAULT_MODEL = "von"
-EngineName = Literal["von", "jev", "laya", "semif", "glinner"]
+EngineName = Literal["von", "jev", "glinner"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -155,10 +144,6 @@ def resolve_engine(model: str | None) -> EngineName:
     resolved = resolve_request_model(model)
     if resolved in JEV_MODELS:
         return "jev"
-    if resolved in LAYA_MODELS:
-        return "laya"
-    if resolved in SEMIF_MODELS:
-        return "semif"
     if resolved in GLINNER_MODELS:
         return "glinner"
     return "von"
@@ -223,8 +208,8 @@ class SystemOneResponse(BaseModel):
 
     duration_ms: float = Field(
         description=(
-            "Wall time of evaluate() including SemIf/Laya load, excluding HTTP. "
-            "Temps mur evaluate() (load SemIf/Laya inclus), hors HTTP."
+            "Wall time of evaluate() including lazy Gliner load, excluding HTTP. "
+            "Temps mur evaluate() (load Gliner inclus), hors HTTP."
         )
     )
     inference_ms: float = Field(

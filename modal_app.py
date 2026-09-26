@@ -16,7 +16,7 @@ MODEL_CACHE_DIR = "/data/models"
 # Persistent model cache (~1.5 GB) shared across warm starts.
 model_cache = modal.Volume.from_name("jev-model-cache", create_if_missing=True)
 
-# CUDA wheels (PyPI `torch` is CPU-only — SemIf 4B on CPU ≈ 1 min / request).
+# CUDA wheels (PyPI `torch` is CPU-only).
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "build-essential")
@@ -34,23 +34,21 @@ image = (
         "pydantic-settings>=2.6.0",
         "httpx>=0.27.0",
         "von-sdk @ git+https://github.com/wfzyx/von.git",
-        "laya>=0.3.5",
-        "gliclass>=0.1.20",
+        "gliner2>=2.0.0",
+        "onnxruntime>=1.20.0",
+        "tokenizers>=0.20.0",
+        "peft>=0.13.0",
     )
-    .run_commands("git clone --depth 1 https://github.com/TheoLeeCJ/SemIf.git /opt/semif")
     .env(
         {
             "PYTHONPATH": "/root/src",
             "VON_BACKEND": "von",
             "JEV_DEVICE": "cuda",
-            "SEMIF_BACKEND": "torch",
-            "SEMIF_SRC": "/opt/semif",
-            "PRELOAD_SEMIF": "true",
             "MODEL_CACHE_DIR": MODEL_CACHE_DIR,
             "HF_HOME": MODEL_CACHE_DIR,
             "HUGGINGFACE_HUB_CACHE": MODEL_CACHE_DIR,
             "DOWNLOAD_ON_STARTUP": "true",
-            "JEV_SOURCE_REV": "semif-cuda-cu124",
+            "JEV_SOURCE_REV": "cuda-cu124",
         }
     )
     .add_local_dir("src", remote_path="/root/src")

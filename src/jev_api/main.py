@@ -1,4 +1,4 @@
-"""jev-api — Jev-compatible System One HTTP server (Von + Laya)."""
+"""jev-api — Jev-compatible System One HTTP server (Von + Gliner + Jev proxy)."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), laya, semif, or glinner. "
+            "Engines: von (default), glinner, or jev. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -112,26 +112,12 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "backbone": eng.von_status.backbone,
                     "error": eng.von_status.error,
                 },
-                "laya": {
-                    "ready": eng.laya_status.ready,
-                    "backend": eng.laya_status.backend,
-                    "backbone": eng.laya_status.backbone,
-                    "error": eng.laya_status.error,
-                    "runtime": "python+transformers",
-                },
-                "semif": {
-                    "ready": eng.semif_status.ready,
-                    "backend": eng.semif_status.backend,
-                    "backbone": eng.semif_status.backbone,
-                    "error": eng.semif_status.error,
-                    "runtime": "qwen3.5-4b-option-logits",
-                },
                 "glinner": {
                     "ready": eng.glinner_status.ready,
                     "backend": eng.glinner_status.backend,
                     "backbone": eng.glinner_status.backbone,
                     "error": eng.glinner_status.error,
-                    "runtime": "gliclass-zero-shot",
+                    "runtime": f"gliner2-decide-{eng.glinner_status.backend}" if eng.glinner_status.ready else "gliner2-decide",
                 },
                 "jev": {
                     "ready": bool(cfg.typesafe_api_key),
@@ -140,11 +126,9 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "runtime": "official-typesafe-proxy",
                 },
                 "note": (
-                    "Switch engine with body.model: von (default), jev, laya, semif, or glinner. "
+                    "Switch engine with body.model: von (default), jev, or glinner. "
                     "model=jev proxies to TypeSafe official Jev (TYPESAFE_API_KEY). "
-                    "laya-mlx is Apple Silicon only; this service uses official laya on CPU. "
-                    "SemIf torch needs CUDA/MPS; CPU uses llama.cpp GGUF (~3GB). "
-                    "glinner is Knowledgator GLiClass (GLiNER-family) zero-shot classification."
+                    "glinner is Fastino GLiNER2.5-Decide."
                 ),
             },
         )

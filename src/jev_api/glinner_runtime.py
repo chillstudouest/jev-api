@@ -1,8 +1,13 @@
-"""GLiClass (GLiNER-family) behind the Jev System One contract.
+"""GLiNER2.5-Decide behind the Jev System One contract.
 
-Named `glinner` in this API: Knowledgator GLiClass zero-shot classifier,
-inspired by GLiNER's single-forward-pass label conditioning. Maps choice /
-score / noul onto single-label classification over the supplied criteria.
+Named `glinner` in this API: Fastino GLiNER2.5-Decide. Every question becomes
+a classification head of the same forward pass, whatever the question count.
+choice / score / noul map onto single-label classification over the supplied
+criteria.
+
+Two backends, picked with `GLINNER_BACKEND`:
+- `torch`: the `gliner2` library on PyTorch.
+- `onnx`: onnxruntime on an ONNX export (`GLINNER_ONNX_VARIANT` fp32 or int8).
 """
 
 from __future__ import annotations
@@ -10,21 +15,28 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from jev_api.config import Settings
 
 logger = logging.getLogger("jev_api.glinner")
 
-DEFAULT_GLINNER_REPO = "knowledgator/gliclass-base-v1.0"
+DEFAULT_GLINNER_REPO = "fastino/GLiNER2.5-Decide"
+
+
+# (state text, heads) -> probabilities keyed by head task, then by option id.
+Scorer = Callable[[str, list["_Head"]], dict[str, dict[str, float]]]
 
 
 @dataclass
 class GlinerRuntime:
-    pipeline: Any
+    scorer: Scorer
     backbone: str
     device: str
+    backend: str = "torch"
 
     def evaluate(self, state: object, questions: dict[str, Any]) -> dict[str, Any]:
         return evaluate_glinner(self, state, questions)
@@ -37,24 +49,6 @@ def _state_text(state: object) -> str:
         return json.dumps(state, ensure_ascii=False, sort_keys=True)
     except TypeError:
         return str(state)
-
-
-def _label_text(key: str, description: object | None) -> str:
-    if isinstance(description, str) and description.strip():
-        return f"{key}: {description.strip()}"
-    return str(key)
-
-
-def _softmax(scores: dict[str, float]) -> dict[str, float]:
-    if not scores:
-        return {}
-    import math
-
-    # Stabilize; GLiClass multi-label scores are independent sigmoids.
-    peak = max(scores.values())
-    exps = {key: math.exp(value - peak) for key, value in scores.items()}
-    total = sum(exps.values()) or 1.0
-    return {key: value / total for key, value in exps.items()}
 
 
 def _confidence(probabilities: dict[str, float]) -> float:
@@ -71,44 +65,20 @@ def _estimate_tokens(text: str, labels: list[str]) -> int:
     return max(1, len(joined) // 4)
 
 
-def _classify(
-    runtime: GlinerRuntime,
-    text: str,
-    label_map: dict[str, str],
-    prompt: str,
-) -> dict[str, float]:
-    """Return a probability distribution keyed by original option ids."""
-    labels = list(label_map.values())
-    reverse = {label: key for key, label in label_map.items()}
-    raw = runtime.pipeline(
-        text,
-        labels,
-        threshold=0.0,
-        # multi-label returns a score per option; we softmax into a System One dist.
-        classification_type="multi-label",
-        prompt=prompt,
-        batch_size=1,
-    )
-    # Pipeline returns list-of-lists for batch; one text → first element.
-    rows = raw[0] if isinstance(raw, list) and raw and isinstance(raw[0], list) else raw
-    if not isinstance(rows, list):
-        raise RuntimeError(f"Unexpected GLiClass output: {type(raw)!r}")
+def _resolve_device(requested: str) -> str:
+    if requested == "cuda":
+        try:
+            import torch
 
-    scores: dict[str, float] = {key: 0.0 for key in label_map}
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        label = str(item.get("label", ""))
-        score = float(item.get("score", 0.0) or 0.0)
-        key = reverse.get(label)
-        if key is not None:
-            scores[key] = score
-
-    # Independent sigmoids → softmax so choice/score/noul stay calibrated-ish.
-    return _softmax(scores)
+            return "cuda:0" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            return "cpu"
+    if requested == "mps":
+        return "mps"
+    return "cpu"
 
 
-def load_glinner_runtime(settings: Settings) -> tuple[GlinerRuntime, int | None, str]:
+def _prepare_cache(settings: Settings) -> str:
     cache = str(settings.model_cache_dir)
     os.makedirs(cache, exist_ok=True)
     os.environ["HF_HOME"] = cache
@@ -118,122 +88,192 @@ def load_glinner_runtime(settings: Settings) -> tuple[GlinerRuntime, int | None,
     if settings.hf_token:
         os.environ["HF_TOKEN"] = settings.hf_token
         os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.hf_token
+    return cache
 
-    from gliclass import GLiClassModel, ZeroShotClassificationPipeline
-    from transformers import AutoTokenizer
+
+def _torch_scorer(extractor: Any) -> Scorer:
+    def score(text: str, heads: list[_Head]) -> dict[str, dict[str, float]]:
+        # multi_label + threshold 0 + softmax returns the full single-label distribution.
+        tasks = {
+            head.task: {
+                "labels": dict(head.label_map),
+                "multi_label": True,
+                "cls_threshold": 0.0,
+                "class_act": "softmax",
+            }
+            for head in heads
+        }
+        raw = extractor.classify_text(text, tasks, include_confidence=True)
+        if not isinstance(raw, dict):
+            raise RuntimeError(f"Unexpected GLiNER2 output: {type(raw)!r}")
+        return {head.task: _rows_to_probabilities(head, raw.get(head.task)) for head in heads}
+
+    return score
+
+
+def _onnx_scorer(model: Any) -> Scorer:
+    from jev_api.glinner_onnx import OnnxTask
+
+    def score(text: str, heads: list[_Head]) -> dict[str, dict[str, float]]:
+        tasks = [OnnxTask(name=head.task, labels=dict(head.label_map)) for head in heads]
+        return model.probabilities(text, tasks)
+
+    return score
+
+
+def _load_torch(settings: Settings, device: str) -> tuple[GlinerRuntime, int | None, str]:
+    from gliner2 import AutoExtractor
 
     repo = settings.glinner_hf_repo
-    device = settings.device
-    if device == "cuda":
-        try:
-            import torch
-
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            device = "cpu"
-    elif device == "mps":
-        device = "mps"
-    else:
-        device = "cpu"
-
-    logger.info("Loading Gliner (GLiClass) repo=%s device=%s cache=%s", repo, device, cache)
-    model = GLiClassModel.from_pretrained(repo, cache_dir=cache)
-    tokenizer = AutoTokenizer.from_pretrained(repo, cache_dir=cache)
-    pipeline = ZeroShotClassificationPipeline(
-        model,
-        tokenizer,
-        classification_type="single-label",
-        device=device,
-        progress_bar=False,
-        max_length=settings.glinner_max_length,
-    )
-
-    params: int | None = None
-    if hasattr(model, "parameters"):
-        params = sum(p.numel() for p in model.parameters())
-
-    runtime = GlinerRuntime(pipeline=pipeline, backbone=repo, device=device)
-    if params is not None:
-        logger.info("Gliner ready: %.1fM parameters on %s", params / 1e6, device)
-    else:
-        logger.info("Gliner ready on %s", device)
+    logger.info("Loading Gliner (torch) repo=%s device=%s", repo, device)
+    extractor = AutoExtractor.from_pretrained(repo)
+    if device != "cpu":
+        extractor = extractor.to(device)
+    extractor.eval()
+    params = sum(p.numel() for p in extractor.parameters())
+    logger.info("Gliner ready: %.1fM parameters on %s", params / 1e6, device)
+    runtime = GlinerRuntime(scorer=_torch_scorer(extractor), backbone=repo, device=device, backend="torch")
     return runtime, params, repo
+
+
+ONNX_FILES = {"fp32": "model.onnx", "int8": "model_int8.onnx"}
+
+
+def _load_onnx(settings: Settings, cache: str) -> tuple[GlinerRuntime, int | None, str]:
+    from huggingface_hub import hf_hub_download
+
+    from jev_api.glinner_onnx import GlinerOnnx
+
+    variant = settings.glinner_onnx_variant
+    if variant not in ONNX_FILES:
+        raise ValueError(f"GLINNER_ONNX_VARIANT must be one of {sorted(ONNX_FILES)}, got {variant!r}")
+    repo = settings.glinner_onnx_repo
+    revision = settings.glinner_onnx_revision
+    logger.info("Loading Gliner (onnx %s) repo=%s@%s", variant, repo, revision)
+    model_path = hf_hub_download(repo, ONNX_FILES[variant], revision=revision, cache_dir=cache)
+    tokenizer_path = hf_hub_download(repo, "tokenizer.json", revision=revision, cache_dir=cache)
+    model = GlinerOnnx(Path(model_path), Path(tokenizer_path), threads=settings.glinner_threads)
+    backbone = f"{repo}:{variant}"
+    runtime = GlinerRuntime(scorer=_onnx_scorer(model), backbone=backbone, device="cpu", backend=f"onnx-{variant}")
+    logger.info("Gliner ready: onnx %s on cpu", variant)
+    return runtime, None, backbone
+
+
+def load_glinner_runtime(settings: Settings) -> tuple[GlinerRuntime, int | None, str]:
+    cache = _prepare_cache(settings)
+    if settings.glinner_backend == "onnx":
+        return _load_onnx(settings, cache)
+    if settings.glinner_backend != "torch":
+        raise ValueError(f"GLINNER_BACKEND must be torch or onnx, got {settings.glinner_backend!r}")
+    return _load_torch(settings, _resolve_device(settings.device))
+
+
+@dataclass
+class _Head:
+    qid: str
+    qtype: str
+    task: str
+    label_map: dict[str, str]
+    legend: dict[str, str] | None = None
+
+
+def _build_head(qid: str, raw: object, used_tasks: set[str]) -> _Head:
+    if not isinstance(raw, dict):
+        raise ValueError(f"questions.{qid} must be an object")
+    qtype = str(raw.get("type", "")).strip().lower()
+    instructions = raw.get("instructions")
+    if not isinstance(instructions, str) or not instructions.strip():
+        raise ValueError(f"questions.{qid} instructions must be a nonempty string")
+
+    # GLiNER2 reads the task name as the question; keep it unique per request.
+    task = instructions.strip()
+    if task in used_tasks:
+        # Parentheses are GLiNER2 structure tokens, so never add them here.
+        task = f"{task} #{qid}"
+    used_tasks.add(task)
+
+    if qtype == "choice":
+        criteria = raw.get("criteria")
+        if not isinstance(criteria, dict) or len(criteria) < 2:
+            raise ValueError(f"questions.{qid} choice criteria must be an object")
+        label_map = {
+            str(key): value.strip() if isinstance(value, str) and value.strip() else str(key)
+            for key, value in criteria.items()
+        }
+        return _Head(qid=qid, qtype=qtype, task=task, label_map=label_map)
+
+    if qtype == "score":
+        levels = raw.get("criteria")
+        if not isinstance(levels, list) or len(levels) < 2:
+            raise ValueError(f"questions.{qid} score criteria must be a list")
+        legend = {str(index): str(label) for index, label in enumerate(levels)}
+        return _Head(qid=qid, qtype=qtype, task=task, label_map=dict(legend), legend=legend)
+
+    if qtype == "noul":
+        criteria = raw.get("criteria")
+        true_desc = "Yes"
+        false_desc = "No"
+        if isinstance(criteria, dict):
+            if isinstance(criteria.get("true"), str) and criteria["true"].strip():
+                true_desc = criteria["true"].strip()
+            if isinstance(criteria.get("false"), str) and criteria["false"].strip():
+                false_desc = criteria["false"].strip()
+        return _Head(
+            qid=qid,
+            qtype=qtype,
+            task=task,
+            label_map={"true": true_desc, "false": false_desc},
+        )
+
+    raise ValueError(f"Unsupported question type for glinner: {qtype!r}")
+
+
+def _rows_to_probabilities(head: _Head, rows: object) -> dict[str, float]:
+    probs: dict[str, float] = {key: 0.0 for key in head.label_map}
+    if not isinstance(rows, list):
+        rows = [rows]
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("label", ""))
+        if key in probs:
+            probs[key] = float(item.get("confidence", 0.0) or 0.0)
+    total = sum(probs.values())
+    if total <= 0:
+        return {key: 1.0 / len(probs) for key in probs}
+    return {key: value / total for key, value in probs.items()}
 
 
 def evaluate_glinner(runtime: GlinerRuntime, state: object, questions: dict[str, Any]) -> dict[str, Any]:
     state_text = _state_text(state)
+    used_tasks: set[str] = set()
+    heads = [_build_head(str(qid), raw, used_tasks) for qid, raw in questions.items()]
+
+    scored = runtime.scorer(state_text, heads)
+
     answers: dict[str, dict[str, Any]] = {}
-    input_tokens = 0
-
-    for qid, raw in questions.items():
-        if not isinstance(raw, dict):
-            raise ValueError(f"questions.{qid} must be an object")
-        qtype = str(raw.get("type", "")).strip().lower()
-        instructions = raw.get("instructions")
-        if not isinstance(instructions, str) or not instructions.strip():
-            raise ValueError(f"questions.{qid} instructions must be a nonempty string")
-
-        prompt = instructions.strip()
-        text = f"{state_text}\n\nQuestion: {prompt}"
-
-        if qtype == "choice":
-            criteria = raw.get("criteria")
-            if not isinstance(criteria, dict) or len(criteria) < 2:
-                raise ValueError(f"questions.{qid} choice criteria must be an object")
-            label_map = {
-                str(key): _label_text(str(key), value) for key, value in criteria.items()
-            }
-            probs = _classify(runtime, text, label_map, prompt)
-            choice = max(probs, key=probs.get)
-            answers[qid] = {
+    for head in heads:
+        probs = scored[head.task]
+        if head.qtype == "choice":
+            answers[head.qid] = {
                 "type": "choice",
-                "choice": choice,
+                "choice": max(probs, key=probs.get),
                 "probabilities": probs,
                 "confidence": _confidence(probs),
             }
-            input_tokens += _estimate_tokens(text, list(label_map.values()))
-
-        elif qtype == "score":
-            levels = raw.get("criteria")
-            if not isinstance(levels, list) or len(levels) < 2:
-                raise ValueError(f"questions.{qid} score criteria must be a list")
-            label_map = {
-                str(index): _label_text(str(index), label)
-                for index, label in enumerate(levels)
-            }
-            probs = _classify(runtime, text, label_map, prompt)
-            legend = {str(index): str(label) for index, label in enumerate(levels)}
-            score = sum(int(key) * value for key, value in probs.items())
-            answers[qid] = {
+        elif head.qtype == "score":
+            answers[head.qid] = {
                 "type": "score",
-                "score": float(score),
-                "legend": legend,
+                "score": float(sum(int(key) * value for key, value in probs.items())),
+                "legend": head.legend or {},
                 "probabilities": probs,
                 "confidence": _confidence(probs),
             }
-            input_tokens += _estimate_tokens(text, list(label_map.values()))
-
-        elif qtype == "noul":
-            criteria = raw.get("criteria")
-            true_desc = "Yes"
-            false_desc = "No"
-            if isinstance(criteria, dict):
-                if isinstance(criteria.get("true"), str) and criteria["true"].strip():
-                    true_desc = criteria["true"].strip()
-                if isinstance(criteria.get("false"), str) and criteria["false"].strip():
-                    false_desc = criteria["false"].strip()
-            label_map = {
-                "true": _label_text("true", true_desc),
-                "false": _label_text("false", false_desc),
-            }
-            probs = _classify(runtime, text, label_map, prompt)
-            answers[qid] = {"type": "noul", "noul": float(probs.get("true", 0.0))}
-            input_tokens += _estimate_tokens(text, list(label_map.values()))
-
         else:
-            raise ValueError(f"Unsupported question type for glinner: {qtype!r}")
+            answers[head.qid] = {"type": "noul", "noul": float(probs.get("true", 0.0))}
 
+    labels = [label for head in heads for label in (head.task, *head.label_map.values())]
     return {
         "answers": answers,
-        "usage": {"input_tokens": input_tokens, "output_tokens": 0},
+        "usage": {"input_tokens": _estimate_tokens(state_text, labels), "output_tokens": 0},
     }

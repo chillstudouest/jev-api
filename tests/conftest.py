@@ -40,24 +40,6 @@ class FakeEngine(VerdictEngine):
             backend="von",
             name="von",
         )
-        self.laya_status = EngineStatus(
-            ready=True,
-            loading=False,
-            parameters=421_000_000,
-            backbone="convaiinnovations/laya",
-            device="cpu",
-            backend="laya",
-            name="laya",
-        )
-        self.semif_status = EngineStatus(
-            ready=True,
-            loading=False,
-            parameters=4_000_000_000,
-            backbone="Qwen/Qwen3.5-4B",
-            device="cpu",
-            backend="llamacpp",
-            name="semif",
-        )
         self.jev_status = EngineStatus(
             ready=True,
             loading=False,

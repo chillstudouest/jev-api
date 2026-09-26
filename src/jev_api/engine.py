@@ -1,4 +1,4 @@
-"""Von + Laya + SemIf + Gliner engines behind the Jev-compatible HTTP contract."""
+"""Von + Gliner engines, plus the official Jev proxy, behind the Jev-compatible HTTP contract."""
 
 from __future__ import annotations
 
@@ -70,9 +70,7 @@ class EngineStatus:
     def not_ready_message(self) -> str:
         labels = {
             "von": ("Von OptionMarker", "~1.5GB"),
-            "laya": ("Laya", "~0.8GB"),
-            "semif": ("SemIf Qwen3.5-4B", "~3GB GGUF / ~8GB BF16"),
-            "glinner": ("Gliner (GLiClass)", "~0.2–0.4GB"),
+            "glinner": ("Gliner (GLiNER2.5-Decide)", "~0.6–1.8GB"),
         }
         label, size = labels.get(self.name, (self.name, "weights"))
         if self.error:
@@ -86,7 +84,7 @@ class EngineStatus:
 
 
 class VerdictEngine:
-    """Load Von on startup; load Laya lazily (or via PRELOAD_LAYA)."""
+    """Load Von on startup; load Gliner lazily (or via PRELOAD_GLINNER)."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -96,18 +94,6 @@ class VerdictEngine:
             name="von",
             backbone=settings.hf_repo,
         )
-        self.laya_status = EngineStatus(
-            device=settings.device,
-            backend="laya",
-            name="laya",
-            backbone=settings.laya_hf_repo,
-        )
-        self.semif_status = EngineStatus(
-            device=settings.device,
-            backend="semif",
-            name="semif",
-            backbone=settings.semif_hf_repo,
-        )
         self.glinner_status = EngineStatus(
             device=settings.device,
             backend="glinner",
@@ -115,12 +101,8 @@ class VerdictEngine:
             backbone=settings.glinner_hf_repo,
         )
         self._load_lock = threading.Lock()
-        self._laya_lock = threading.Lock()
-        self._semif_lock = threading.Lock()
         self._glinner_lock = threading.Lock()
         self._von: Any = None
-        self._laya: Any = None
-        self._semif: Any = None
         self._glinner: Any = None
 
     @property
@@ -131,10 +113,6 @@ class VerdictEngine:
     def start_background_load(self) -> None:
         thread = threading.Thread(target=self._safe_load, name="von-model-load", daemon=True)
         thread.start()
-        if self.settings.preload_laya:
-            threading.Thread(target=self._safe_load_laya, name="laya-model-load", daemon=True).start()
-        if self.settings.preload_semif:
-            threading.Thread(target=self._safe_load_semif, name="semif-model-load", daemon=True).start()
         if self.settings.preload_glinner:
             threading.Thread(target=self._safe_load_glinner, name="glinner-model-load", daemon=True).start()
 
@@ -143,14 +121,6 @@ class VerdictEngine:
         self._safe_load()
         if not self.von_status.ready:
             raise RuntimeError(self.von_status.not_ready_message())
-        if self.settings.preload_laya:
-            self._safe_load_laya()
-            if not self.laya_status.ready:
-                raise RuntimeError(self.laya_status.not_ready_message())
-        if self.settings.preload_semif:
-            self._safe_load_semif()
-            if not self.semif_status.ready:
-                raise RuntimeError(self.semif_status.not_ready_message())
         if self.settings.preload_glinner:
             self._safe_load_glinner()
             if not self.glinner_status.ready:
@@ -173,43 +143,6 @@ class VerdictEngine:
                 self._von = None
             finally:
                 self.von_status.loading = False
-
-    def _safe_load_laya(self) -> None:
-        with self._laya_lock:
-            if self.laya_status.ready:
-                return
-            if self.laya_status.loading:
-                return
-            self.laya_status.loading = True
-            self.laya_status.error = None
-            try:
-                self._load_laya()
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("Laya model load failed")
-                self.laya_status.error = str(exc)
-                self.laya_status.ready = False
-                self._laya = None
-            finally:
-                self.laya_status.loading = False
-
-
-    def _safe_load_semif(self) -> None:
-        with self._semif_lock:
-            if self.semif_status.ready:
-                return
-            if self.semif_status.loading:
-                return
-            self.semif_status.loading = True
-            self.semif_status.error = None
-            try:
-                self._load_semif()
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("SemIf model load failed")
-                self.semif_status.error = str(exc)
-                self.semif_status.ready = False
-                self._semif = None
-            finally:
-                self.semif_status.loading = False
 
     def _safe_load_glinner(self) -> None:
         with self._glinner_lock:
@@ -294,33 +227,6 @@ class VerdictEngine:
         else:
             logger.info("Von ready on %s", settings.device)
 
-    def _load_laya(self) -> None:
-        from jev_api.laya_runtime import load_laya_agent
-
-        self._prepare_hf_cache()
-        agent, params, backbone = load_laya_agent(self.settings)
-        self._laya = agent
-        self.laya_status.parameters = params
-        self.laya_status.backbone = backbone
-        self.laya_status.device = self.settings.device
-        self.laya_status.backend = "laya"
-        self.laya_status.ready = True
-        self.laya_status.error = None
-
-
-    def _load_semif(self) -> None:
-        from jev_api.semif_runtime import load_semif_runtime
-
-        self._prepare_hf_cache()
-        runtime, params, backbone = load_semif_runtime(self.settings)
-        self._semif = runtime
-        self.semif_status.parameters = params
-        self.semif_status.backbone = backbone
-        self.semif_status.device = self.settings.device
-        self.semif_status.backend = runtime.backend
-        self.semif_status.ready = True
-        self.semif_status.error = None
-
     def _load_glinner(self) -> None:
         from jev_api.glinner_runtime import load_glinner_runtime
 
@@ -330,25 +236,10 @@ class VerdictEngine:
         self.glinner_status.parameters = params
         self.glinner_status.backbone = backbone
         self.glinner_status.device = runtime.device
-        self.glinner_status.backend = "glinner"
+        self.glinner_status.backend = runtime.backend
         self.glinner_status.ready = True
         self.glinner_status.error = None
 
-
-    def ensure_laya(self) -> None:
-        if self.laya_status.ready and self._laya is not None:
-            return
-        self._safe_load_laya()
-        if not self.laya_status.ready or self._laya is None:
-            raise RuntimeError(self.laya_status.not_ready_message())
-
-
-    def ensure_semif(self) -> None:
-        if self.semif_status.ready and self._semif is not None:
-            return
-        self._safe_load_semif()
-        if not self.semif_status.ready or self._semif is None:
-            raise RuntimeError(self.semif_status.not_ready_message())
 
     def ensure_glinner(self) -> None:
         if self.glinner_status.ready and self._glinner is not None:
@@ -365,16 +256,6 @@ class VerdictEngine:
                 self._von = None
                 self.von_status.ready = False
                 self.von_status.loading = False
-        elif name == "laya":
-            with self._laya_lock:
-                self._laya = None
-                self.laya_status.ready = False
-                self.laya_status.loading = False
-        elif name == "semif":
-            with self._semif_lock:
-                self._semif = None
-                self.semif_status.ready = False
-                self.semif_status.loading = False
         elif name == "glinner":
             with self._glinner_lock:
                 self._glinner = None
@@ -393,10 +274,6 @@ class VerdictEngine:
 
         if engine_name == "jev":
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_jev(request, watch)
-        elif engine_name == "laya":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_laya(request, watch)
-        elif engine_name == "semif":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_semif(request, watch)
         elif engine_name == "glinner":
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_glinner(request, watch)
         else:
@@ -518,55 +395,6 @@ class VerdictEngine:
         )
         return answers, usage, inference_ms, gpu_ms
 
-    def _evaluate_laya(
-        self, request: SystemOneRequest, watch: Stopwatch
-    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
-        from jev_api.laya_runtime import laya_system_one
-
-        watch.measure("load", self.ensure_laya)
-        if self._laya is None:
-            raise RuntimeError(self.laya_status.not_ready_message())
-
-        raw, inference_ms, gpu_duration_ms = _time_inference(
-            lambda: laya_system_one(self._laya, request.state, request.questions)
-        )
-        watch.steps["forward"] = inference_ms
-        raw_answers = raw.get("answers")
-        if not isinstance(raw_answers, dict):
-            raise ValueError("Laya response is missing answers")
-        answers = watch.measure("map_answers", lambda: answers_from_mapping(raw_answers, source="Laya"))
-        for qid, raw_q in request.questions.items():
-            qtype = str(raw_q.get("type", "")) if isinstance(raw_q, dict) else ""
-            watch.questions.append({"id": str(qid), "type": qtype, "ms": 0.0})
-        usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
-        usage = Usage(
-            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
-            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
-        )
-        return answers, usage, inference_ms, gpu_duration_ms
-
-    def _evaluate_semif(
-        self, request: SystemOneRequest, watch: Stopwatch
-    ) -> tuple[dict[str, Answer], Usage, float, float | None]:
-        watch.measure("load", self.ensure_semif)
-        if self._semif is None:
-            raise RuntimeError(self.semif_status.not_ready_message())
-
-        raw, inference_ms, gpu_duration_ms = _time_inference(
-            lambda: self._semif.evaluate(request.state, request.questions)
-        )
-        watch.steps["forward"] = inference_ms
-        answers = watch.measure("map_answers", lambda: answers_from_mapping(raw["answers"], source="SemIf"))
-        for qid, raw_q in request.questions.items():
-            qtype = str(raw_q.get("type", "")) if isinstance(raw_q, dict) else ""
-            watch.questions.append({"id": str(qid), "type": qtype, "ms": 0.0})
-        usage_raw = raw["usage"]
-        usage = Usage(
-            input_tokens=int(usage_raw.get("input_tokens", 0) or 0),
-            output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
-        )
-        return answers, usage, inference_ms, gpu_duration_ms
-
     def _evaluate_glinner(
         self, request: SystemOneRequest, watch: Stopwatch
     ) -> tuple[dict[str, Answer], Usage, float, float | None]:
@@ -588,8 +416,6 @@ class VerdictEngine:
             output_tokens=int(usage_raw.get("output_tokens", 0) or 0),
         )
         return answers, usage, inference_ms, gpu_duration_ms
-
-
 
 
 def _format_von_state(state: object) -> str:
