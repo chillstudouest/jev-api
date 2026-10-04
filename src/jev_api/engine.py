@@ -104,6 +104,7 @@ class VerdictEngine:
         self._glinner_lock = threading.Lock()
         self._von: Any = None
         self._glinner: Any = None
+        self._last_activity = time.monotonic()
 
     @property
     def status(self) -> EngineStatus:
@@ -115,6 +116,62 @@ class VerdictEngine:
         thread.start()
         if self.settings.preload_glinner:
             threading.Thread(target=self._safe_load_glinner, name="glinner-model-load", daemon=True).start()
+        if self.settings.warmup_on_startup:
+            threading.Thread(target=self._warm_loop, name="engine-warmup", daemon=True).start()
+
+    def _warm_loop(self) -> None:
+        """Warm once loads finish, then keep warm while idle. Never raises."""
+        try:
+            while not self._loads_settled():
+                time.sleep(1.0)
+            self.warmup()
+            interval = self.settings.keep_warm_interval_s
+            while interval > 0:
+                time.sleep(interval)
+                if time.monotonic() - self._last_activity >= interval:
+                    self.warmup()
+        except Exception:  # noqa: BLE001
+            logger.exception("Warm loop stopped")
+
+    def _loads_settled(self) -> bool:
+        statuses = [self.von_status]
+        if self.settings.preload_glinner:
+            statuses.append(self.glinner_status)
+        return all(s.ready or s.error for s in statuses)
+
+    def warmup(self) -> None:
+        """Run a dummy decision through every loaded engine (mixed question types)."""
+        if not self.von_status.ready:
+            return
+        model = "gliner-von" if self.glinner_status.ready else "von"
+        request = SystemOneRequest(
+            state="Charged twice for September and cancelling Friday unless refunded.",
+            model=model,
+            questions={
+                "route": {
+                    "type": "choice",
+                    "instructions": "Which team should handle this?",
+                    "criteria": {"billing": "Payments and refunds", "technical": "Bugs and outages"},
+                },
+                "urgency": {
+                    "type": "noul",
+                    "instructions": "Does this need a reply today?",
+                    "criteria": {"true": "Time-sensitive", "false": "Can wait"},
+                },
+                "severity": {
+                    "type": "score",
+                    "instructions": "How severe is this?",
+                    "criteria": ["Low", "Medium", "High", "Critical"],
+                },
+            },
+        )
+        started = time.perf_counter()
+        try:
+            self.systemone(request)
+        except Exception:  # noqa: BLE001
+            logger.exception("Warmup failed")
+            return
+        logger.info("Warmup %s done in %.0f ms", model, (time.perf_counter() - started) * 1000.0)
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
@@ -281,6 +338,7 @@ class VerdictEngine:
         else:
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_von(request, model_name, watch)
 
+        self._last_activity = time.monotonic()
         duration_ms = watch.total_ms()
         timings = RequestTimings(
             engine=engine_name,

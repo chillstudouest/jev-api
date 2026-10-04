@@ -40,6 +40,11 @@ class Settings(BaseSettings):
         default="fastino/GLiNER2.5-Decide", alias="GLINNER_HF_REPO"
     )
     preload_glinner: bool = Field(default=False, alias="PRELOAD_GLINNER")
+    # One dummy decision per loaded engine after load, so the first real request is not cold.
+    warmup_on_startup: bool = Field(default=True, alias="WARMUP_ON_STARTUP")
+    # Re-run the dummy decision when no request came in for this many seconds, so the OS
+    # keeps the weights resident and the CPU awake. 0 disables.
+    keep_warm_interval_s: float = Field(default=45.0, alias="KEEP_WARM_INTERVAL_S")
     # torch (gliner2 library) or onnx (onnxruntime, CPU only).
     glinner_backend: str = Field(default="onnx", alias="GLINNER_BACKEND")
     glinner_onnx_repo: str = Field(
