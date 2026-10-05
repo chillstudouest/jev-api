@@ -6,19 +6,15 @@ Engines, switched per request with the JSON `model` field:
 
 | `model` | Engine | Weights |
 | --- | --- | --- |
-| **`von`** (default) | [Von OptionMarker 395M](https://github.com/wfzyx/von) | `wfzyx/von-1.0` |
+| **`gliner-von`** (default) | `noul` → [Von OptionMarker 395M](https://github.com/wfzyx/von), `choice` / `score` → [GLiNER2.5-Decide](https://huggingface.co/fastino/GLiNER2.5-Decide) (ONNX on CPU), in one request | `wfzyx/von-1.0` + [`nishparadox/gliner2.5-decide-onnx`](https://huggingface.co/nishparadox/gliner2.5-decide-onnx) (fp32) |
 | **`jev`** | Official TypeSafe Jev (proxy) | `api.typesafe.ai` (`TYPESAFE_API_KEY`) |
-| **`glinner`** | [GLiNER2.5-Decide](https://huggingface.co/fastino/GLiNER2.5-Decide), ONNX on CPU by default | [`nishparadox/gliner2.5-decide-onnx`](https://huggingface.co/nishparadox/gliner2.5-decide-onnx) (fp32) |
-| **`gliner-von`** | `noul` → Von, `choice` / `score` → Gliner, in one request | both of the above |
 
 > Protocol compatibility ≠ model identity. Same `/v1/systemone` shapes as Jev.
 
 ```text
 Client  →  POST /v1/systemone  →  jev-api
-              model=von        →  Von 395M
-              model=jev        →  TypeSafe official Jev
-              model=glinner    →  GLiNER2.5-Decide
               model=gliner-von →  noul: Von · choice/score: Gliner
+              model=jev        →  TypeSafe official Jev
 ```
 
 Prod: `https://jev-api.codiku.com`
@@ -35,17 +31,17 @@ Prod: `https://jev-api.codiku.com`
 
 Accepted `model` values:
 
-- **Von:** `von` (default), plus aliases `von-latest`, `von-preview`, `von-1.0.0`, `von-option-marker`, `jev-latest`, `jev-preview`, `jev-1.13.0`
+- **Gliner + Von:** `gliner-von` (default), plus aliases `gliner-von-latest`, `jev-latest`, `jev-preview`, `jev-1.13.0`
 - **Official Jev:** `jev`, plus aliases `jev-official`, `typesafe`, `typesafe-jev` — needs `TYPESAFE_API_KEY`
-- **Gliner:** `glinner`, plus aliases `glinner-latest`, `decide`, `gliner2-decide`
-- **Gliner + Von:** `gliner-von`, plus alias `gliner-von-latest`
 
-`/ready` stays Von-based so existing deploys keep working. Gliner downloads on first use (`PRELOAD_GLINNER=true` to load at startup).
+Any other value (including the retired `von` and `glinner`) returns `400 Unknown model`.
+
+`/ready` reports Von. Gliner loads at startup too (`PRELOAD_GLINNER=true`, the default).
 
 ## Weights
 
 - Von **`wfzyx/von-1.0`** (~1.5 GB) — loaded at startup into `MODEL_CACHE_DIR`
-- Gliner **GLiNER2.5-Decide** (DeBERTa-v3-large) — every question is a head of the same forward pass. Lazy-loaded unless `PRELOAD_GLINNER=true`.
+- Gliner **GLiNER2.5-Decide** (DeBERTa-v3-large) — every question is a head of the same forward pass. Loaded at startup (`PRELOAD_GLINNER=true`).
   - `GLINNER_BACKEND=onnx` (default): onnxruntime on the pinned [ONNX export](https://huggingface.co/nishparadox/gliner2.5-decide-onnx). `GLINNER_ONNX_VARIANT=fp32` (1.75 GB, default) gives the same answers as torch; `int8` (643 MB) is smaller but lossy.
   - `GLINNER_BACKEND=torch`: the `gliner2` library on `fastino/GLiNER2.5-Decide`, needed for CUDA/MPS.
 
@@ -88,13 +84,13 @@ Wait for `/ready` → `true` (first Von download ~1.5 GB).
 ## Example
 
 ```bash
-# Von (default)
+# gliner-von (default)
 curl -s https://jev-api.codiku.com/v1/systemone \
   -H "Authorization: Bearer $JEV_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "state": "Charged twice for September and cancelling Friday unless refunded.",
-    "model": "von",
+    "model": "gliner-von",
     "questions": {
       "route": {
         "type": "choice",
@@ -117,22 +113,20 @@ curl -s https://jev-api.codiku.com/v1/systemone \
     }
   }'
 
-# Gliner / official Jev (same payload, only model changes)
-curl ... -d '{ "model": "glinner", "state": "...", "questions": { ... } }'
+# Official Jev (same payload, only model changes)
 curl ... -d '{ "model": "jev", "state": "...", "questions": { ... } }'
 ```
 
 ## Benchmark
 
 ```bash
-python scripts/benchmark.py --api-key "$JEV_API_KEY" --model von --n 20
-python scripts/benchmark.py --api-key "$JEV_API_KEY" --model glinner --n 20
+python scripts/benchmark.py --api-key "$JEV_API_KEY" --model gliner-von --n 20
 
-# Sequential in-process compare on public JevBench decisions (--models jev,von,glinner by default)
-PYTHONPATH=src python scripts/compare_models.py --models von,glinner --limit 120 --repeats 1 --warmup 1 --out /tmp/compare-120.json
+# Sequential in-process compare on public JevBench decisions (--models jev,gliner-von by default)
+PYTHONPATH=src python scripts/compare_models.py --models gliner-von --limit 120 --repeats 1 --warmup 1 --out /tmp/compare-120.json
 ```
 
-First Gliner call may download weights and take minutes; later calls are in-process.
+First startup downloads the weights and may take minutes; later calls are in-process.
 
 ## Env
 
@@ -147,7 +141,7 @@ First Gliner call may download weights and take minutes; later calls are in-proc
 | `GLINNER_ONNX_VARIANT` | `fp32` | `fp32` or `int8` |
 | `GLINNER_THREADS` | — | onnxruntime intra-op threads |
 | `GLINNER_HF_REPO` | `fastino/GLiNER2.5-Decide` | torch checkpoint |
-| `PRELOAD_GLINNER` | `false` | Load Gliner at startup |
+| `PRELOAD_GLINNER` | `true` | Load Gliner at startup (needed by `gliner-von`) |
 | `TYPESAFE_API_KEY` | — | Needed for `model=jev` |
 | `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | Official Jev endpoint |
 | `TYPESAFE_MODEL` | `jev-1.13.0` | Model sent upstream |
@@ -158,15 +152,15 @@ First Gliner call may download weights and take minutes; later calls are in-proc
 
 ## Resources
 
-Von ~**395M / ~1.5 GB**. Gliner onnx fp32 ~**1.9 GB** RSS (int8 ~1.3 GB). Coolify memory limit **8 GiB**, 1 Uvicorn worker. Leave Gliner lazy.
+Von ~**395M / ~1.5 GB**. Gliner onnx fp32 ~**1.9 GB** RSS (int8 ~1.3 GB). Coolify memory limit **8 GiB**, 1 Uvicorn worker.
 
 ## Benchmarks
 
 Jev and Von are frozen baselines in `benchmarks/baselines.json` and are never re-run. Bench only new engines, in-process or against the deployed API:
 
 ```bash
-MODEL_CACHE_DIR=data/models PYTHONPATH=src python scripts/bench_new_model.py --model glinner --label glinner-onnx-fp32-mac
-PYTHONPATH=src python scripts/bench_new_model.py --model glinner --url https://jev-api.codiku.com --key "$JEV_API_KEY" --label glinner-onnx-fp32-vps
+MODEL_CACHE_DIR=data/models PYTHONPATH=src python scripts/bench_new_model.py --model gliner-von --label gliner-von-mac
+PYTHONPATH=src python scripts/bench_new_model.py --model gliner-von --url https://jev-api.codiku.com --key "$JEV_API_KEY" --label gliner-von-vps
 ```
 
 Each run covers the 120 public JevBench decisions and `benchmarks/support_ticket.json`, is saved to `benchmarks/results/<label>.json`, and prints next to the baselines.

@@ -33,7 +33,7 @@ def test_choice_two_options_shape(client, auth_headers, jev_fixtures) -> None:
         isinstance(body["gpu_duration_ms"], (int, float)) and body["gpu_duration_ms"] >= 0
     )
     timings = body["timings"]
-    assert timings["engine"] == "von"
+    assert timings["engine"] == "gliner-von"
     assert timings["question_count"] == 1
     assert timings["state_chars"] > 0
     assert timings["questions"][0]["id"] == "route"
@@ -151,7 +151,7 @@ def test_api_v1_alias(client, auth_headers, jev_fixtures) -> None:
     assert "route" in response.json()["answers"]
 
 
-def test_default_model_is_von(client, auth_headers) -> None:
+def test_default_model_is_gliner_von(client, auth_headers) -> None:
     payload = {
         "state": "x",
         "questions": {
@@ -163,17 +163,18 @@ def test_default_model_is_von(client, auth_headers) -> None:
         },
     }
     body = _post(client, auth_headers, payload).json()
-    assert body["model"] == "von"
+    assert body["model"] == "gliner-von"
 
 
 def test_model_info(client, auth_headers) -> None:
     body = client.get("/v1/model", headers=auth_headers).json()
     assert body["protocol"] == "jev-systemone"
-    assert body["engine"] == "von-option-marker-395m"
-    assert "von" in body["accepted_models"]
-    assert "glinner" in body["accepted_models"]
+    assert body["engine"] == "gliner-von"
+    assert "gliner-von" in body["accepted_models"]
     assert "jev" in body["accepted_models"]
-    assert body["extras"]["default_model"] == "von"
+    assert "von" not in body["accepted_models"]
+    assert "glinner" not in body["accepted_models"]
+    assert body["extras"]["default_model"] == "gliner-von"
     assert "glinner" in body["extras"]
     assert "jev" in body["extras"]
 
@@ -181,13 +182,12 @@ def test_model_info(client, auth_headers) -> None:
 @pytest.mark.parametrize(
     "model",
     [
-        "von",
-        "glinner",
+        "gliner-von",
+        "gliner-von-latest",
         "jev",
         "jev-latest",
         "jev-preview",
         "jev-1.13.0",
-        "von-option-marker",
         None,
     ],
 )
@@ -205,4 +205,4 @@ def test_accepted_model_aliases(client, auth_headers, model) -> None:
     if model is not None:
         payload["model"] = model
     body = _post(client, auth_headers, payload).json()
-    assert body["model"] == (model or "von")
+    assert body["model"] == (model or "gliner-von")

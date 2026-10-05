@@ -1,7 +1,7 @@
 """Jev / TypeSafe System One HTTP contract schemas.
 
 Protocol-compatible with POST /v1/systemone.
-Engines: `von`, `glinner` (GLiNER2.5-Decide), and `jev` (official TypeSafe proxy).
+Engines: `gliner-von` (default: Gliner for choice / score, Von for noul) and `jev` (official TypeSafe proxy).
 """
 
 from __future__ import annotations
@@ -10,12 +10,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
-VON_MODELS = (
-    "von",
-    "von-latest",
-    "von-preview",
-    "von-1.0.0",
-    "von-option-marker",
+# Gliner answers choice / score, Von answers noul (best of each on JevBench).
+# The jev-* version names keep old clients on the local engine.
+GLINER_VON_MODELS = (
+    "gliner-von",
+    "gliner-von-latest",
     "jev-latest",
     "jev-preview",
     "jev-1.13.0",
@@ -26,20 +25,9 @@ JEV_MODELS = (
     "typesafe",
     "typesafe-jev",
 )
-GLINNER_MODELS = (
-    "glinner",
-    "glinner-latest",
-    "decide",
-    "gliner2-decide",
-)
-# Gliner answers choice / score, Von answers noul (best of each on JevBench).
-GLINER_VON_MODELS = (
-    "gliner-von",
-    "gliner-von-latest",
-)
-SUPPORTED_MODELS = VON_MODELS + JEV_MODELS + GLINNER_MODELS + GLINER_VON_MODELS
-DEFAULT_MODEL = "von"
-EngineName = Literal["von", "jev", "glinner", "gliner-von"]
+SUPPORTED_MODELS = GLINER_VON_MODELS + JEV_MODELS
+DEFAULT_MODEL = "gliner-von"
+EngineName = Literal["gliner-von", "jev"]
 
 
 class ChoiceQuestion(BaseModel):
@@ -149,11 +137,7 @@ def resolve_engine(model: str | None) -> EngineName:
     resolved = resolve_request_model(model)
     if resolved in JEV_MODELS:
         return "jev"
-    if resolved in GLINNER_MODELS:
-        return "glinner"
-    if resolved in GLINER_VON_MODELS:
-        return "gliner-von"
-    return "von"
+    return "gliner-von"
 
 
 class ChoiceAnswer(BaseModel):
@@ -263,6 +247,6 @@ class ModelInfoResponse(BaseModel):
     checkpoint_repo: str
     ready: bool
     protocol: str = "jev-systemone"
-    engine: str = "von-option-marker-395m"
+    engine: str = "gliner-von"
     accepted_models: list[str] = Field(default_factory=lambda: list(SUPPORTED_MODELS))
     extras: dict[str, Any] = Field(default_factory=dict)

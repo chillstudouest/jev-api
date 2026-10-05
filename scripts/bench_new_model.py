@@ -5,8 +5,8 @@ Jev and Von are never re-run: their numbers live in benchmarks/baselines.json.
 Runs the public JevBench decisions and benchmarks/support_ticket.json, either
 in-process (default) or against a deployed jev-api (--url).
 
-    PYTHONPATH=src python scripts/bench_new_model.py --model glinner --label onnx-fp32-mac
-    PYTHONPATH=src python scripts/bench_new_model.py --model glinner --url https://jev-api.codiku.com --label onnx-fp32-vps
+    PYTHONPATH=src python scripts/bench_new_model.py --model gliner-von --label onnx-fp32-mac
+    PYTHONPATH=src python scripts/bench_new_model.py --model gliner-von --url https://jev-api.codiku.com --label onnx-fp32-vps
 """
 
 from __future__ import annotations
@@ -67,7 +67,8 @@ def _local_call(model: str) -> Call:
     from jev_api.schemas import SystemOneRequest
 
     engine = VerdictEngine(Settings(download_on_startup=False))
-    if resolve_engine(model) == "glinner":
+    if resolve_engine(model) == "gliner-von":
+        engine.load_blocking()
         engine.ensure_glinner()
 
     def call(state: object, questions: dict[str, Any]) -> tuple[dict[str, Answer], float]:
@@ -100,8 +101,8 @@ def main() -> None:
     parser.add_argument("--skip-jevbench", action="store_true")
     args = parser.parse_args()
 
-    if resolve_engine(args.model) in {"jev", "von"}:
-        raise SystemExit("jev and von are frozen baselines (benchmarks/baselines.json); bench a new engine instead.")
+    if resolve_engine(args.model) == "jev":
+        raise SystemExit("jev is a frozen baseline (benchmarks/baselines.json); bench a new engine instead.")
 
     call = _remote_call(args.url, args.key, args.model, args.timeout) if args.url else _local_call(args.model)
     baselines = json.loads((BENCH_DIR / "baselines.json").read_text(encoding="utf-8"))

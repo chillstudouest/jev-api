@@ -6,15 +6,15 @@ from jev_api.engine import _time_inference, answers_from_mapping
 from jev_api.schemas import ApiUsageError, NoulAnswer, resolve_engine, resolve_request_model
 
 
-def test_default_model_is_von() -> None:
-    assert resolve_request_model(None) == "von"
-    assert resolve_engine(None) == "von"
+def test_default_model_is_gliner_von() -> None:
+    assert resolve_request_model(None) == "gliner-von"
+    assert resolve_engine(None) == "gliner-von"
 
 
-@pytest.mark.parametrize("name", ["von", "von-latest", "jev-latest", "jev-1.13.0"])
-def test_von_aliases(name: str) -> None:
+@pytest.mark.parametrize("name", ["gliner-von", "gliner-von-latest", "jev-latest", "jev-preview", "jev-1.13.0"])
+def test_gliner_von_aliases(name: str) -> None:
     assert resolve_request_model(name) == name
-    assert resolve_engine(name) == "von"
+    assert resolve_engine(name) == "gliner-von"
 
 
 @pytest.mark.parametrize("name", ["jev", "jev-official", "typesafe", "typesafe-jev"])
@@ -23,10 +23,10 @@ def test_jev_official_aliases(name: str) -> None:
     assert resolve_engine(name) == "jev"
 
 
-@pytest.mark.parametrize("name", ["glinner", "glinner-latest", "decide", "gliner2-decide"])
-def test_glinner_aliases(name: str) -> None:
-    assert resolve_request_model(name) == name
-    assert resolve_engine(name) == "glinner"
+@pytest.mark.parametrize("name", ["von", "von-latest", "glinner", "decide"])
+def test_retired_models_are_unknown(name: str) -> None:
+    with pytest.raises(ApiUsageError, match="Unknown model"):
+        resolve_request_model(name)
 
 
 def test_time_inference_reports_wall_and_optional_gpu() -> None:
@@ -65,7 +65,7 @@ def test_answers_from_mapping_strips_noul_confidence() -> None:
     assert dumped == {"type": "noul", "noul": 0.81}
 
 
-def test_engine_dispatches_glinner_without_weights(tmp_path) -> None:
+def test_gliner_von_choice_only_skips_von(tmp_path) -> None:
     from jev_api.config import Settings
     from jev_api.engine import VerdictEngine
     from jev_api.schemas import ChoiceAnswer, SystemOneRequest
@@ -98,7 +98,7 @@ def test_engine_dispatches_glinner_without_weights(tmp_path) -> None:
     response = engine.systemone(
         SystemOneRequest(
             state="charged twice",
-            model="glinner",
+            model="gliner-von",
             questions={
                 "route": {
                     "type": "choice",
@@ -108,7 +108,7 @@ def test_engine_dispatches_glinner_without_weights(tmp_path) -> None:
             },
         )
     )
-    assert response.model == "glinner"
+    assert response.model == "gliner-von"
     route = response.answers["route"]
     assert isinstance(route, ChoiceAnswer)
     assert route.choice == "billing"

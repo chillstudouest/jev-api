@@ -1,4 +1,4 @@
-"""Von + Gliner engines, plus the official Jev proxy, behind the Jev-compatible HTTP contract."""
+"""gliner-von (Gliner + Von) and the official Jev proxy, behind the Jev-compatible HTTP contract."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ class EngineStatus:
 
 
 class VerdictEngine:
-    """Load Von on startup; load Gliner lazily (or via PRELOAD_GLINNER)."""
+    """Load Von on startup; load Gliner with it (PRELOAD_GLINNER) or on first request."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -143,10 +143,9 @@ class VerdictEngine:
         """Run a dummy decision through every loaded engine (mixed question types)."""
         if not self.von_status.ready:
             return
-        model = "gliner-von" if self.glinner_status.ready else "von"
         request = SystemOneRequest(
             state="Charged twice for September and cancelling Friday unless refunded.",
-            model=model,
+            model="gliner-von",
             questions={
                 "route": {
                     "type": "choice",
@@ -171,7 +170,7 @@ class VerdictEngine:
         except Exception:  # noqa: BLE001
             logger.exception("Warmup failed")
             return
-        logger.info("Warmup %s done in %.0f ms", model, (time.perf_counter() - started) * 1000.0)
+        logger.info("Warmup gliner-von done in %.0f ms", (time.perf_counter() - started) * 1000.0)
 
     def load_blocking(self) -> None:
         """Load in the current thread (used during FastAPI lifespan startup)."""
@@ -331,12 +330,8 @@ class VerdictEngine:
 
         if engine_name == "jev":
             answers, usage, inference_ms, gpu_duration_ms = self._evaluate_jev(request, watch)
-        elif engine_name == "glinner":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_glinner(request, watch)
-        elif engine_name == "gliner-von":
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_gliner_von(request, model_name, watch)
         else:
-            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_von(request, model_name, watch)
+            answers, usage, inference_ms, gpu_duration_ms = self._evaluate_gliner_von(request, model_name, watch)
 
         self._last_activity = time.monotonic()
         duration_ms = watch.total_ms()

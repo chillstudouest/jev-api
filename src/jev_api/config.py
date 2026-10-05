@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     )
 
     api_version: str = "1.3.0"
-    model_name: str = "von"
+    model_name: str = "gliner-von"
     model_version: str = "1.0"
-    runtime_name: str = "pytorch+von+glinner+jev"
+    runtime_name: str = "pytorch+gliner-von+jev"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     glinner_hf_repo: str = Field(
         default="fastino/GLiNER2.5-Decide", alias="GLINNER_HF_REPO"
     )
-    preload_glinner: bool = Field(default=False, alias="PRELOAD_GLINNER")
+    # gliner-von needs both models, so Gliner loads at startup alongside Von.
+    preload_glinner: bool = Field(default=True, alias="PRELOAD_GLINNER")
     # One dummy decision per loaded engine after load, so the first real request is not cold.
     warmup_on_startup: bool = Field(default=True, alias="WARMUP_ON_STARTUP")
     # Re-run the dummy decision when no request came in for this many seconds, so the OS

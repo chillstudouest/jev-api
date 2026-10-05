@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         description=(
             "Self-hosted Jev-compatible System One API. "
             "Protocol: TypeSafe / jev-agent POST /v1/systemone. "
-            "Engines: von (default), glinner, gliner-von, or jev. "
+            "Engines: gliner-von (default) or jev. "
             "Switch with the request body `model` field."
         ),
         lifespan=lifespan,
@@ -104,7 +104,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
             checkpoint_repo=cfg.hf_repo,
             ready=eng.status.ready,
             extras={
-                "default_model": "von",
+                "default_model": "gliner-von",
                 "von_backend": eng.von_status.backend,
                 "von": {
                     "ready": eng.von_status.ready,
@@ -126,9 +126,9 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
                     "runtime": "official-typesafe-proxy",
                 },
                 "note": (
-                    "Switch engine with body.model: von (default), jev, glinner, or gliner-von. "
-                    "model=jev proxies to TypeSafe official Jev (TYPESAFE_API_KEY). "
-                    "glinner is Fastino GLiNER2.5-Decide. gliner-von sends noul to Von, choice / score to Gliner."
+                    "Switch engine with body.model: gliner-von (default) or jev. "
+                    "gliner-von sends noul to Von, choice / score to Gliner (GLiNER2.5-Decide). "
+                    "model=jev proxies to TypeSafe official Jev (TYPESAFE_API_KEY)."
                 ),
             },
         )
@@ -140,7 +140,7 @@ def create_app(settings: Settings | None = None, engine: VerdictEngine | None = 
         except ApiUsageError as exc:
             raise_usage(400, exc.message, exc.error_type)
             raise
-        if engine_name in ("von", "gliner-von") and not eng.von_status.ready:
+        if engine_name == "gliner-von" and not eng.von_status.ready:
             raise_usage(503, eng.von_status.not_ready_message(), error_type="server_error")
         try:
             return eng.systemone(payload)

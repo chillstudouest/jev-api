@@ -211,11 +211,7 @@ def run_model(
     else:
         assert engine is not None
         engine_name = resolve_engine(model)
-        if engine_name == "von":
-            engine.load_blocking()
-        elif engine_name == "glinner":
-            engine.ensure_glinner()
-        elif engine_name == "gliner-von":
+        if engine_name == "gliner-von":
             engine.load_blocking()
             engine.ensure_glinner()
         else:
@@ -295,7 +291,7 @@ def run_model(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models", default="jev,von,glinner")
+    parser.add_argument("--models", default="jev,gliner-von")
     parser.add_argument("--limit", type=int, default=100, help="Number of JevBench public decisions")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=1)
@@ -368,8 +364,7 @@ def main() -> None:
             flush=True,
         )
         if not args.keep_loaded and model not in REMOTE_JEV_ALIASES:
-            engine_name = resolve_engine(model)
-            for name in ("von", "glinner") if engine_name == "gliner-von" else (engine_name,):
+            for name in ("von", "glinner"):
                 engine.unload(name)
             import gc
 

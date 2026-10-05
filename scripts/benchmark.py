@@ -15,7 +15,7 @@ from typing import Any
 
 PAYLOAD = {
     "state": "Charged twice for September and cancelling Friday unless refunded.",
-    "model": "von",
+    "model": "gliner-von",
     "questions": {
         "route": {
             "type": "choice",
@@ -79,7 +79,7 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=120.0)
-    parser.add_argument("--model", default="von", help="von, glinner, or jev")
+    parser.add_argument("--model", default="gliner-von", help="gliner-von or jev")
     args = parser.parse_args()
 
     with urllib.request.urlopen(f"{args.base_url.rstrip('/')}/ready", timeout=args.timeout) as resp:
